@@ -103,11 +103,72 @@ belong in the harness that produces traces, not in the library that scores them.
 
 ---
 
-## Using it as a deploy gate
+## Pointing it at your agent
 
-`voxeval` doesn't run your agent. It scores traces you already have — which means
-it works against a live call recording, a replay harness, or a synthetic fixture
-without changing your pipeline.
+There is no `openai:gpt-4`-style provider string for voice, and no trace format
+voice stacks agree on — so `voxeval` asks you for one of two small callables and
+does the rest.
+
+**Evaluating the recognizer** — anything `audio → text`. A lambda satisfies it:
+
+```python
+from voxeval import run_audio, AudioCase, Term
+
+cases = [AudioCase(
+    id="accented-order",
+    audio=Path("fixtures/order.wav"),
+    reference="one kung pao chicken",
+    terms=[Term("Kung Pao Chicken", variants=("kung pao",), collapses=("compound chicken",))],
+    languages=["en", "zh"],
+)]
+
+report = run_audio(cases, lambda path: deepgram.transcribe(path).text)
+sys.exit(report.gate().exit_code())
+```
+
+**Evaluating the conversation** — anything `caller turns → CallTrace`:
+
+```python
+from voxeval import run_scenarios, Scenario, CallTrace, ToolCall, ToolExpectation
+
+def my_agent(caller_turns):
+    result = replay_conversation(caller_turns)     # your agent, text mode
+    return CallTrace(
+        transcript=result.transcript,
+        tool_calls=[ToolCall(t.name, t.args) for t in result.tools],
+        utterances=result.timeline,
+        latencies=result.timings,
+    )
+
+report = run_scenarios([
+    Scenario("takeout", ["I'd like a pizza", "yes, that's right"],
+             ToolExpectation(required=("placeOrder", "confirmOrder"),
+                             commit_tools=("confirmOrder",))),
+], my_agent)
+```
+
+Most teams implement `Agent` against a **text-mode replay** rather than real
+audio. It runs in CI in seconds with no media stack, and still exercises the
+prompt, the tools and the business logic — which is where regressions live.
+Evaluate the audio path separately with a `Transcriber`. Splitting the two is
+what keeps this runnable on every commit instead of nightly.
+
+### In pytest
+
+```python
+from voxeval import assert_gate, run_scenarios
+
+def test_voice_agent_has_not_regressed():
+    assert_gate(run_scenarios(SCENARIOS, my_agent))
+```
+
+Failures print the whole report, not just the first tripped check.
+
+### Or bring your own traces
+
+The callables are a convenience over the primitive, which is scoring traces you
+already have. Build `TurnCase` and `ConversationCase` directly when you're
+evaluating recorded production calls rather than running anything.
 
 ```python
 import sys
@@ -193,7 +254,7 @@ customer. The closest analogy is `pytest` rather than a leaderboard.
 ```bash
 git clone https://github.com/<you>/voxeval && cd voxeval
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q          # 97 tests, no network
+.venv/bin/pytest -q          # 106 tests, no network
 ```
 
 The test suite is the specification — every metric's edge cases are written down

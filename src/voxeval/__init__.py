@@ -23,6 +23,17 @@ synthetic fixture without changing your pipeline.
     sys.exit(report.gate().exit_code())
 """
 
+from .adapters import (
+    Agent,
+    AudioCase,
+    CallTrace,
+    Scenario,
+    Transcriber,
+    Transcription,
+    assert_gate,
+    run_audio,
+    run_scenarios,
+)
 from .case import (
     ConversationCase,
     ConversationResult,
@@ -47,6 +58,8 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Suite", "SuiteReport",
+    "run_audio", "run_scenarios", "assert_gate",
+    "Transcriber", "Transcription", "Agent", "CallTrace", "AudioCase", "Scenario",
     "TurnCase", "TurnResult", "ConversationCase", "ConversationResult",
     "Gate", "GateResult", "Threshold", "Severity", "default_gate",
     "Term", "TurnLatency", "Utterance", "ToolCall", "ToolExpectation",

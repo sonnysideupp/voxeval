@@ -131,11 +131,12 @@ class CallTrace:
     because a joined string no longer says which words the recognizer got wrong.
     """
 
-    transcript: str = ""
+    transcript: str | None = None
     turns: list[Turn] = field(default_factory=list)
-    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_calls: list[ToolCall] | None = None
+    """None derives from turns; an explicit `[]` asserts no tool fired."""
     utterances: list[Utterance] = field(default_factory=list)
-    latencies: list[TurnLatency] = field(default_factory=list)
+    latencies: list[TurnLatency] | None = None
 
     def __post_init__(self) -> None:
         if not self.transcript and not self.turns:

@@ -96,14 +96,11 @@ class TestStageLatenciesAreGated:
     """Regression: stt/llm/tts p95 were aggregated into metrics but no threshold
     consumed them, so a run could measure a 1.7s STT finalization and print PASS."""
 
-    # Only metrics that are genuinely diagnostic belong here, and each needs a
-    # reason. Anything else that Suite computes must be gated, or a regression in
-    # it prints PASS.
-    DIAGNOSTIC_ONLY = {
-        # Reported for context alongside `wer`; gating both double-counts the
-        # same underlying failure and makes the pair harder to read.
-        "semantic_similarity",
-    }
+    # Deliberately empty. Every metric Suite computes is gated, and an entry
+    # here for a metric that *is* gated (semantic_similarity was one) defeats the
+    # guard: the threshold could then be deleted without this test noticing.
+    # Only add a name here alongside a reason it must never be a deploy check.
+    DIAGNOSTIC_ONLY: set[str] = set()
 
     def test_every_computed_metric_has_a_threshold(self):
         from voxeval import Suite, default_gate

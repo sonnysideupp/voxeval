@@ -267,3 +267,51 @@ class TestVoiceMultiTurn:
         from voxeval import ConversationCase, Suite
         case = ConversationCase(id="legacy", transcript="Customer: hi\nAgent: hello")
         assert Suite().add_conversation(case).run().conversations[0].ok
+
+
+class TestExplicitEmptyIsNotAbsent:
+    """`[]` is a claim, not an absence.
+
+    Deriving over an explicitly empty list means the library silently
+    contradicts its own input on the one metric where being wrong means a
+    customer got charged.
+    """
+
+    def _turns(self):
+        from voxeval import ToolCall, Turn, TurnLatency
+        return [Turn(spoken="place it",
+                     tool_calls=[ToolCall("confirmOrder")],
+                     latency=TurnLatency(end_to_end_ms=500.0))]
+
+    def test_explicit_empty_tool_calls_survives(self):
+        from voxeval import ConversationCase
+        case = ConversationCase(id="c", turns=self._turns(), tool_calls=[])
+        assert case.tool_calls == []
+
+    def test_omitted_tool_calls_derives_from_turns(self):
+        from voxeval import ConversationCase
+        case = ConversationCase(id="c", turns=self._turns())
+        assert [c.name for c in case.tool_calls] == ["confirmOrder"]
+
+    def test_explicit_empty_does_not_satisfy_a_required_tool(self):
+        # The exact failure: a caller asserts no tool fired, the turns contain
+        # one, and a `required` check passes on data the caller said was empty.
+        from voxeval import ConversationCase, Suite, ToolExpectation
+        report = Suite().add_conversation(ConversationCase(
+            id="c", turns=self._turns(), tool_calls=[],
+            expected_tools=ToolExpectation(required=("confirmOrder",)),
+        )).run()
+        assert report.metrics["tool_call_failures"] == 1.0
+
+    def test_explicit_empty_latencies_survives(self):
+        from voxeval import ConversationCase
+        assert ConversationCase(id="c", turns=self._turns(), latencies=[]).latencies == []
+
+    def test_explicit_transcript_wins_over_turns(self):
+        from voxeval import ConversationCase
+        case = ConversationCase(id="c", turns=self._turns(), transcript="explicit")
+        assert case.transcript == "explicit"
+
+    def test_no_turns_and_no_transcript_yields_empty_string(self):
+        from voxeval import ConversationCase
+        assert ConversationCase(id="c").transcript == ""

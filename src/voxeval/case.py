@@ -240,12 +240,15 @@ class ConversationCase:
     """
 
     id: str
-    transcript: str = ""
+    transcript: str | None = None
+    """None means "derive from turns". An explicitly supplied string wins."""
     turns: list[Turn] = field(default_factory=list)
-    tool_calls: list[ToolCall] = field(default_factory=list)
+    tool_calls: list[ToolCall] | None = None
+    """None means "derive from turns". An explicit `[]` is an assertion that NO
+    tool fired, and is preserved — see __post_init__."""
     expected_tools: ToolExpectation | None = None
     utterances: list[Utterance] = field(default_factory=list)
-    latencies: list[TurnLatency] = field(default_factory=list)
+    latencies: list[TurnLatency] | None = None
 
     judge: Judge | None = None
     """Optional model-based scorer for conversation quality."""
@@ -260,15 +263,20 @@ class ConversationCase:
     that variance lands on your deploy gate."""
 
     def __post_init__(self) -> None:
-        # Derive the flat fields from turns, but never overwrite an explicit
-        # value: a caller who passes both means the explicit one.
-        if self.turns:
-            if not self.transcript:
-                self.transcript = self.render_transcript()
-            if not self.tool_calls:
-                self.tool_calls = [c for t in self.turns for c in t.tool_calls]
-            if not self.latencies:
-                self.latencies = [t.latency for t in self.turns if t.latency is not None]
+        # Derive ONLY what was omitted (None), never what was supplied.
+        #
+        # The distinction matters because `[]` is a claim, not an absence. A
+        # caller passing tool_calls=[] is asserting no tool fired; if that were
+        # treated as "unset" and refilled from the turns, a `required` check
+        # could pass on a trace the caller explicitly said was empty — the
+        # library silently contradicting its input on the one metric where
+        # being wrong means a customer was charged.
+        if self.transcript is None:
+            self.transcript = self.render_transcript() if self.turns else ""
+        if self.tool_calls is None:
+            self.tool_calls = [c for t in self.turns for c in t.tool_calls]
+        if self.latencies is None:
+            self.latencies = [t.latency for t in self.turns if t.latency is not None]
 
     def render_transcript(self) -> str:
         """The spoken conversation, as the judge should see it.
@@ -291,6 +299,10 @@ class ConversationCase:
 
     def evaluate(self) -> ConversationResult:
         commit_tools = self.expected_tools.commit_tools if self.expected_tools else ()
+        # __post_init__ has filled these; the locals exist so the annotations
+        # stay honest about what a caller may pass.
+        transcript = self.transcript or ""
+        tool_calls = self.tool_calls if self.tool_calls is not None else []
         return ConversationResult(
             case=self,
             turns=[c.evaluate() for c in self.turn_cases()],
@@ -298,18 +310,18 @@ class ConversationCase:
             # with nothing to compare against produces a number that drifts with
             # the model version and measures nothing.
             verdict=(
-                safe_judge(self.judge, self.scenario, self.expected_behavior, self.transcript)
+                safe_judge(self.judge, self.scenario, self.expected_behavior, transcript)
                 if self.judge is not None and self.expected_behavior
                 else None
             ),
             tools=(
-                check_tool_calls(self.tool_calls, self.expected_tools)
+                check_tool_calls(tool_calls, self.expected_tools)
                 if self.expected_tools
                 else None
             ),
             turn_taking=analyze_turns(self.utterances) if self.utterances else None,
             false_completion=(
-                claimed_without_committing(self.transcript, self.tool_calls, commit_tools)
+                claimed_without_committing(transcript, tool_calls, commit_tools)
                 if commit_tools else False
             ),
         )

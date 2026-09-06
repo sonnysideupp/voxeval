@@ -96,7 +96,7 @@ class Suite:
 
         all_latencies = [c.latency for c in self._turns if c.latency is not None]
         for conv in self._conversations:
-            all_latencies.extend(conv.latencies)
+            all_latencies.extend(conv.latencies or [])
         latency = analyze(all_latencies) if all_latencies else None
         judge = JudgeReport([c.verdict for c in conversations if c.verdict is not None])
 

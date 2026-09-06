@@ -229,3 +229,29 @@ class TestCallTraceTurns:
         from voxeval import CallTrace
         with pytest.raises(ValueError, match="turns or a transcript"):
             CallTrace()
+
+
+class TestCallTraceExplicitEmpty:
+    def test_explicit_empty_tool_calls_reaches_the_case(self):
+        from voxeval import CallTrace, Scenario, ToolCall, ToolExpectation, Turn, run_scenarios
+
+        report = run_scenarios(
+            [Scenario(id="s", caller_turns=["hi"],
+                      expected_tools=ToolExpectation(required=("confirmOrder",)))],
+            lambda turns: CallTrace(
+                turns=[Turn(spoken="do it", tool_calls=[ToolCall("confirmOrder")])],
+                tool_calls=[],
+            ),
+        )
+        assert report.metrics["tool_call_failures"] == 1.0
+
+    def test_omitted_tool_calls_still_derive(self):
+        from voxeval import CallTrace, Scenario, ToolCall, ToolExpectation, Turn, run_scenarios
+
+        report = run_scenarios(
+            [Scenario(id="s", caller_turns=["hi"],
+                      expected_tools=ToolExpectation(required=("confirmOrder",)))],
+            lambda turns: CallTrace(
+                turns=[Turn(spoken="do it", tool_calls=[ToolCall("confirmOrder")])]),
+        )
+        assert report.metrics["tool_call_failures"] == 0.0

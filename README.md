@@ -408,12 +408,13 @@ Worth stating plainly rather than discovering later:
   and spoken-number folding are English. `semantic_wer` degrades to ordinary WER
   on other languages rather than failing, but it will not help there. Term recall
   and script detection are language-agnostic and remain the better tools.
-* **Term matching folds English plurals only.** `Term("spring roll")` matches
-  "spring rolls" and `Term("glass")` matches "glasses", but irregular plurals
-  ("leaf"/"leaves") and non-English morphology are not handled. The escape hatch
-  is explicit `Term.variants`. Matching is on token boundaries, so `Term("ham")`
-  will not match "champagne" — an earlier substring version did, reporting a term
-  as found when it was never spoken.
+* **Morphology is English-only.** `fold_plural` handles regular plurals, `-es`
+  after a sibilant, and a table of irregulars ("leaf"/"leaves",
+  "knife"/"knives", "child"/"children"). It does not handle other languages, and
+  the irregular table is a lookup rather than a full pluralizer — the escape
+  hatch for anything it misses is an explicit `Term.variants`. Term matching is
+  on token boundaries, so `Term("ham")` will not match "champagne"; an earlier
+  substring version did, reporting a term as found when it was never spoken.
 * **Number folding is deliberately shallow.** "twenty five" folds to 25; "one
   hundred and twenty three" does not. A wrong fold invents an error in a quantity,
   which is worse than leaving two tokens unmatched.

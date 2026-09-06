@@ -141,3 +141,44 @@ class TestQuotedContractions:
 
     def test_possessive_still_untouched(self):
         assert semantic_normalize("General Tso's") == "general tso s"
+
+
+class TestFoldPlural:
+    """English morphology lives in one place now. It used to be split between a
+    private `_singular` in transcription.py and the contraction/number map here —
+    two layers of the same kind of normalization, free to drift apart."""
+
+    def test_regular_and_es_plurals(self):
+        from voxeval.metrics import fold_plural
+        for plural, singular in [("rolls", "roll"), ("glasses", "glass"),
+                                 ("boxes", "box"), ("dishes", "dish"),
+                                 ("sandwiches", "sandwich"), ("roses", "rose")]:
+            assert fold_plural(plural) == singular
+
+    def test_irregular_plurals(self):
+        from voxeval.metrics import fold_plural
+        for plural, singular in [("leaves", "leaf"), ("knives", "knife"),
+                                 ("halves", "half"), ("loaves", "loaf"),
+                                 ("children", "child"), ("people", "person"),
+                                 ("potatoes", "potato"), ("tomatoes", "tomato")]:
+            assert fold_plural(plural) == singular
+
+    def test_unchanged_forms(self):
+        from voxeval.metrics import fold_plural
+        # Already singular, invariant, or simply not a plural. "hamster" is the
+        # one that matters: folding must never become prefix matching.
+        for word in ["ham", "hamster", "glass", "fish", "sheep", "series"]:
+            assert fold_plural(word) == word
+
+    def test_folding_is_idempotent(self):
+        from voxeval.metrics import fold_plural
+        for word in ["leaves", "glasses", "rolls", "children", "ham"]:
+            assert fold_plural(fold_plural(word)) == fold_plural(word)
+
+    def test_singular_and_plural_converge(self):
+        # The property that makes symmetric folding safe: both spellings land on
+        # the same key, so it never has to be correct English.
+        from voxeval.metrics import fold_plural
+        for a, b in [("leaf", "leaves"), ("knife", "knives"), ("roll", "rolls"),
+                     ("glass", "glasses"), ("child", "children")]:
+            assert fold_plural(a) == fold_plural(b)

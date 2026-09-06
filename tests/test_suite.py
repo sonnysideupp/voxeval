@@ -198,3 +198,72 @@ class TestMetricKeysAreStable:
         metrics = Suite().add_turn(TurnCase(id="t", hypothesis="hi")).run().metrics
         assert metrics["stt_p95_ms"] is None
         assert metrics["wer"] is None
+
+
+class TestVoiceMultiTurn:
+    """A Turn is the same object for voice and text; only the transcription gap
+    between `spoken` and `heard` distinguishes them."""
+
+    def _voice_call(self):
+        from voxeval import ConversationCase, Term, Turn
+        return ConversationCase(id="order", turns=[
+            Turn(spoken="I want one kung pao chicken",
+                 heard="I want one compound chicken",
+                 agent_said="Sorry, we don't have that.",
+                 terms=[Term("kung pao chicken", collapses=("compound chicken",))]),
+            Turn(spoken="the kung pao chicken please",
+                 heard="the kung pao chicken please",
+                 agent_said="Got it.",
+                 terms=[Term("kung pao chicken")]),
+        ])
+
+    def test_transcript_is_derived_from_turns(self):
+        case = self._voice_call()
+        assert "Customer:" in case.transcript and "Agent:" in case.transcript
+
+    def test_transcript_uses_what_was_heard_not_what_was_said(self):
+        # The agent replied to "compound chicken"; judging it against words it
+        # never received would score the recognizer twice.
+        assert "compound chicken" in self._voice_call().transcript
+        assert "one kung pao chicken" not in self._voice_call().transcript
+
+    def test_nested_turns_reach_the_suite_metrics(self):
+        from voxeval import Suite
+        report = Suite().add_conversation(self._voice_call()).run()
+        assert report.metrics["wer"] is not None, "turn metrics must not vanish"
+        assert report.metrics["collapses"] == 1.0
+
+    def test_collapse_in_a_turn_fails_the_conversation(self):
+        from voxeval import Suite
+        report = Suite().add_conversation(self._voice_call()).run()
+        assert not report.conversations[0].ok
+
+    def test_text_mode_turns_carry_no_transcription_gap(self):
+        from voxeval import ConversationCase, Suite, Turn
+        case = ConversationCase(id="text", turns=[
+            Turn(spoken="book me a table", agent_said="Sure, for when?"),
+        ])
+        report = Suite().add_conversation(case).run()
+        # Same object, same pipeline — WER simply has nothing to compare.
+        assert report.metrics["wer"] is None
+        assert "book me a table" in case.transcript
+
+    def test_tool_calls_and_latency_derive_from_turns(self):
+        from voxeval import ConversationCase, ToolCall, Turn, TurnLatency
+        case = ConversationCase(id="c", turns=[
+            Turn(spoken="order it", tool_calls=[ToolCall("placeOrder")],
+                 latency=TurnLatency(end_to_end_ms=800.0)),
+        ])
+        assert [c.name for c in case.tool_calls] == ["placeOrder"]
+        assert len(case.latencies) == 1
+
+    def test_explicit_fields_are_not_overwritten(self):
+        from voxeval import ConversationCase, Turn
+        case = ConversationCase(id="c", transcript="explicit",
+                                turns=[Turn(spoken="derived")])
+        assert case.transcript == "explicit"
+
+    def test_flat_transcript_still_works(self):
+        from voxeval import ConversationCase, Suite
+        case = ConversationCase(id="legacy", transcript="Customer: hi\nAgent: hello")
+        assert Suite().add_conversation(case).run().conversations[0].ok

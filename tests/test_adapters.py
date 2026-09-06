@@ -195,3 +195,37 @@ class TestStreaming:
         )
         run_streaming([AudioCase("a", path)], stt, noise=noise, snr_db=0)
         assert seen["rms"] > 0
+
+
+class TestCallTraceTurns:
+    def test_agent_can_return_structured_turns(self):
+        from voxeval import CallTrace, Scenario, Term, Turn, run_scenarios
+
+        def agent(caller_turns):
+            return CallTrace(turns=[
+                Turn(spoken="one kung pao chicken",
+                     heard="one compound chicken",
+                     agent_said="We don't have that.",
+                     terms=[Term("kung pao chicken",
+                                 collapses=("compound chicken",))]),
+            ])
+
+        report = run_scenarios([Scenario(id="s", caller_turns=["hi"])], agent)
+        assert report.metrics["collapses"] == 1.0
+        assert report.metrics["wer"] is not None
+
+    def test_flat_transcript_agent_still_supported(self):
+        from voxeval import CallTrace, Scenario, run_scenarios
+
+        report = run_scenarios(
+            [Scenario(id="s", caller_turns=["hi"])],
+            lambda turns: CallTrace(transcript="Customer: hi\nAgent: hello"),
+        )
+        assert report.conversations[0].ok
+
+    def test_empty_trace_is_rejected(self):
+        import pytest
+
+        from voxeval import CallTrace
+        with pytest.raises(ValueError, match="turns or a transcript"):
+            CallTrace()

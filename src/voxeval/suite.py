@@ -85,8 +85,14 @@ class Suite:
         return self
 
     def run(self) -> SuiteReport:
-        turns = [c.evaluate() for c in self._turns]
         conversations = [c.evaluate() for c in self._conversations]
+
+        # Turns nested inside conversations are scored exactly like standalone
+        # ones. Without this, every transcription metric from a multi-turn voice
+        # call would vanish from the report — the case would look evaluated while
+        # the hearing half of it was silently dropped.
+        turns = [c.evaluate() for c in self._turns]
+        turns += [t for conv in conversations for t in conv.turns]
 
         all_latencies = [c.latency for c in self._turns if c.latency is not None]
         for conv in self._conversations:

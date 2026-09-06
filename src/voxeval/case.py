@@ -150,12 +150,98 @@ class TurnResult:
         return "  ".join(bits)
 
 
+
+@dataclass
+class Turn:
+    """One exchange in a conversation: what the caller said, what the agent heard,
+    what it said back, and what it did.
+
+    This is the abstraction that makes voice and text the same object rather than
+    two parallel ones. The only structural difference between a voice agent and a
+    text agent is that voice has a gap between `spoken` and `heard`:
+
+        voice   spoken="kung pao chicken"  heard="compound chicken"   <- gap
+        text    spoken="kung pao chicken"  heard=None                 <- no gap
+
+    Everything downstream — tool traces, latency, judging, turn-taking — is
+    identical for both. Only the transcription metrics switch on, and they switch
+    on exactly when there is something to compare.
+
+    That gap is the whole reason this library exists. A text harness cannot
+    represent it, so it cannot catch the failure where a slightly-wrong transcript
+    makes a perfectly-behaved agent do the wrong thing.
+    """
+
+    spoken: str | None = None
+    """Ground truth: the TTS input, or a human transcription of real call audio.
+    None when unknown — term recall still works without it."""
+
+    heard: str | None = None
+    """What the recognizer returned. None for a text-mode agent, which hears
+    exactly what was said."""
+
+    agent_said: str = ""
+    """The agent's spoken reply. Judged; never scored for transcription."""
+
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    latency: TurnLatency | None = None
+    terms: list[Term] = field(default_factory=list)
+    languages: list[str] | None = None
+    confidence: float | None = None
+    score_wer: bool = True
+
+    @property
+    def received(self) -> str:
+        """What the agent actually acted on.
+
+        `heard` when a recognizer was involved, `spoken` otherwise. Judging and
+        tool-trace analysis use this, because holding an agent to words it never
+        received is scoring the recognizer twice.
+        """
+        return self.heard if self.heard is not None else (self.spoken or "")
+
+    @property
+    def is_voice(self) -> bool:
+        """True when there is a transcription gap to measure."""
+        return self.spoken is not None and self.heard is not None
+
+    def to_turn_case(self, case_id: str) -> TurnCase:
+        return TurnCase(
+            id=case_id,
+            hypothesis=self.received,
+            reference=self.spoken if self.is_voice else None,
+            terms=self.terms,
+            latency=self.latency,
+            languages=self.languages,
+            confidence=self.confidence,
+            score_wer=self.score_wer,
+        )
+
+
 @dataclass
 class ConversationCase:
-    """A whole call: transcript, tool trace, and optionally the turn timeline."""
+    """A whole call: transcript, tool trace, and optionally the turn timeline.
+
+    Two ways to build one, and `turns` is the better one:
+
+        # Voice or text, structured — everything derives from the turns
+        ConversationCase(id="order", turns=[
+            Turn(spoken="one kung pao chicken", heard="one compound chicken",
+                 agent_said="Sorry, we don't have that.", terms=[...]),
+        ])
+
+        # Flat, when all you have is a logged transcript string
+        ConversationCase(id="order", transcript="Customer: ...\nAgent: ...")
+
+    With `turns`, the transcript, tool calls and latencies are derived, and each
+    turn is *also* scored for transcription — so one object produces both the
+    per-turn hearing metrics and the whole-call behaviour metrics instead of you
+    hand-maintaining two parallel lists linked by an id convention.
+    """
 
     id: str
-    transcript: str
+    transcript: str = ""
+    turns: list[Turn] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     expected_tools: ToolExpectation | None = None
     utterances: list[Utterance] = field(default_factory=list)
@@ -173,10 +259,41 @@ class ConversationCase:
     reason LLM judges score the same transcript 85 one run and 61 the next, and
     that variance lands on your deploy gate."""
 
+    def __post_init__(self) -> None:
+        # Derive the flat fields from turns, but never overwrite an explicit
+        # value: a caller who passes both means the explicit one.
+        if self.turns:
+            if not self.transcript:
+                self.transcript = self.render_transcript()
+            if not self.tool_calls:
+                self.tool_calls = [c for t in self.turns for c in t.tool_calls]
+            if not self.latencies:
+                self.latencies = [t.latency for t in self.turns if t.latency is not None]
+
+    def render_transcript(self) -> str:
+        """The spoken conversation, as the judge should see it.
+
+        Built from `received`, not `spoken` — the agent replied to what it heard,
+        and judging it against words it never got is scoring the recognizer twice
+        under a different name. Transcription error is measured separately, per
+        turn, where it can be attributed.
+        """
+        lines: list[str] = []
+        for turn in self.turns:
+            if turn.received:
+                lines.append(f"Customer: {turn.received}")
+            if turn.agent_said:
+                lines.append(f"Agent: {turn.agent_said}")
+        return "\n".join(lines)
+
+    def turn_cases(self) -> list[TurnCase]:
+        return [t.to_turn_case(f"{self.id}#{i}") for i, t in enumerate(self.turns)]
+
     def evaluate(self) -> ConversationResult:
         commit_tools = self.expected_tools.commit_tools if self.expected_tools else ()
         return ConversationResult(
             case=self,
+            turns=[c.evaluate() for c in self.turn_cases()],
             # Judged only when a rubric exists. Asking a model "was this good?"
             # with nothing to compare against produces a number that drifts with
             # the model version and measures nothing.
@@ -201,6 +318,7 @@ class ConversationCase:
 @dataclass
 class ConversationResult:
     case: ConversationCase
+    turns: list[TurnResult] = field(default_factory=list)
     tools: ToolCallResult | None = None
     turn_taking: TurnTakingReport | None = None
     false_completion: bool = False
@@ -215,10 +333,18 @@ class ConversationResult:
         per-case boolean would make individual results non-reproducible."""
         if self.false_completion:
             return False
+        if any(not t.ok for t in self.turns):
+            return False
         return not (self.tools and not self.tools.ok)
 
     def __str__(self) -> str:
         bits = [self.case.id]
+        if self.turns:
+            wers = [t.wer for t in self.turns if t.wer is not None]
+            if wers:
+                bits.append(f"{len(self.turns)} turns wer={sum(wers) / len(wers):.0%}")
+            else:
+                bits.append(f"{len(self.turns)} turns")
         if self.tools:
             bits.append(str(self.tools))
         if self.false_completion:

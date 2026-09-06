@@ -53,6 +53,7 @@ from .audio import (
 from .case import (
     ConversationCase,
     ConversationResult,
+    Turn,
     TurnCase,
     TurnResult,
 )
@@ -88,7 +89,7 @@ __all__ = [
     "AudioBuffer", "load_wav", "load_pcm", "save_wav", "mix_at_snr", "iter_frames",
     "silence", "concat", "rms", "realtime_schedule",
     "Transcriber", "Transcription", "Agent", "CallTrace", "AudioCase", "Scenario",
-    "TurnCase", "TurnResult", "ConversationCase", "ConversationResult",
+    "Turn", "TurnCase", "TurnResult", "ConversationCase", "ConversationResult",
     "Gate", "GateResult", "Threshold", "Severity", "default_gate",
     "Term", "TurnLatency", "Utterance", "ToolCall", "ToolExpectation",
     "word_error_rate", "term_recall", "check_language", "confidence_gate",

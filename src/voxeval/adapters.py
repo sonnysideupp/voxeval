@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from .audio import AudioBuffer
-from .case import ConversationCase, TurnCase
+from .case import ConversationCase, Turn, TurnCase
 from .gate import Gate
 from .metrics.judge import Judge
 from .metrics.latency import TurnLatency
@@ -123,12 +123,23 @@ class CallTrace:
     This is the contract an `Agent` returns. It mirrors what a voice stack already
     logs, so implementing it is usually reshaping existing data rather than
     instrumenting anything new.
+
+    Prefer `turns`. Returning structured turns gets the transcript, tool calls and
+    latencies derived for you, and — the part that matters — scores each turn's
+    transcription alongside the call's behaviour. Returning only a flat
+    `transcript` still works, but throws away the per-turn hearing metrics,
+    because a joined string no longer says which words the recognizer got wrong.
     """
 
-    transcript: str
+    transcript: str = ""
+    turns: list[Turn] = field(default_factory=list)
     tool_calls: list[ToolCall] = field(default_factory=list)
     utterances: list[Utterance] = field(default_factory=list)
     latencies: list[TurnLatency] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.transcript and not self.turns:
+            raise ValueError("CallTrace needs either turns or a transcript")
 
 
 @runtime_checkable
@@ -269,6 +280,7 @@ def run_scenarios(
         suite.add_conversation(ConversationCase(
             id=scenario.id,
             transcript=trace.transcript,
+            turns=trace.turns,
             tool_calls=trace.tool_calls,
             expected_tools=scenario.expected_tools,
             utterances=trace.utterances,

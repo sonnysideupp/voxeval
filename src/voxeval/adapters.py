@@ -87,11 +87,23 @@ class StreamResult:
     """
 
     finals: list[Final] = field(default_factory=list)
+    interims: list[Final] = field(default_factory=list)
+    """Optional. Only consulted when nothing finalized."""
     audio_ended_at_ms: float = 0.0
 
     @property
     def text(self) -> str:
-        return " ".join(f.text for f in self.finals if f.text).strip()
+        joined = " ".join(f.text for f in self.finals if f.text).strip()
+        if joined:
+            return joined
+        return self.interims[-1].text.strip() if self.interims else ""
+
+    @property
+    def used_interim_fallback(self) -> bool:
+        """True when the transcript came from an interim because nothing
+        finalized. Worth surfacing in a report: the text is usable, the timing
+        is not."""
+        return not any(f.text for f in self.finals) and bool(self.interims)
 
     @property
     def finalization_latency_ms(self) -> float | None:

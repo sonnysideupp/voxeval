@@ -171,13 +171,16 @@ trail ≥ 1500ms on the quiet 0.7s one.
 The tempting story after two providers was "turn-taking models need padding,
 conventional ones don't." ElevenLabs breaks it — it does no endpointing at all
 and is still sensitive on short quiet audio. What the data supports is narrower:
-**short, quiet utterances are fragile everywhere, and endpointing models are
-fragile on top of that.** Measure your provider; don't infer from its
-architecture.
+**short, quiet utterances were fragile on two of the three, and the endpointing
+one was fragile on both fixtures.** Measure your provider; don't infer from its
+category.
 
-ElevenLabs also surfaced a separate trap: **it never emits `FINAL_TRANSCRIPT`**,
-only interims. A harness collecting finals alone records it as transcribing
-nothing — a working recognizer written up as broken.
+ElevenLabs also surfaced a separate trap: **at its default configuration it never
+emits `FINAL_TRANSCRIPT`**, only interims. A harness collecting finals alone
+records it as transcribing nothing — a working recognizer written up as broken.
+`StreamResult` takes interims and falls back to them, flagging it via
+`used_interim_fallback`. (With server VAD enabled it does finalize; that mode was
+not swept.)
 
 **Latency the transcript can't show.** All seven fixtures transcribed perfectly —
 WER 0.00, term recall 1.00. But finalization latency ran a 583ms median with

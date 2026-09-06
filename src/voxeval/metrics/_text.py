@@ -70,7 +70,20 @@ def fold_plural(token: str) -> str:
         if stem.endswith(("ss", "x", "z", "ch", "sh")):
             return stem
     if len(token) > 2 and token.endswith("s") and not token.endswith("ss"):
-        return token[:-1]
+        token = token[:-1]
+    # Final canonicalization of the y/ie endings, applied to BOTH spellings so
+    # they converge without the fold having to know which it started from.
+    #
+    # This is the case a plain "-ies -> -y" rule gets wrong: "berries" is berry
+    # + ies, but "cookies" is cookie + s, and nothing in the plural distinguishes
+    # them without a dictionary. Folding both endings to "i" sidesteps the
+    # question entirely — berry/berries both land on "berri", cookie/cookies both
+    # on "cooki", fry/fries both on "fri". None are words; all are consistent,
+    # which is the only property this needs.
+    if token.endswith("ie"):
+        return token[:-2] + "i"
+    if token.endswith("y"):
+        return token[:-1] + "i"
     return token
 
 

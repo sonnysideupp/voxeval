@@ -182,3 +182,30 @@ class TestFoldPlural:
         for a, b in [("leaf", "leaves"), ("knife", "knives"), ("roll", "rolls"),
                      ("glass", "glasses"), ("child", "children")]:
             assert fold_plural(a) == fold_plural(b)
+
+
+class TestIesPlurals:
+    """A plain "-ies -> -y" rule cannot work: "berries" is berry+ies but
+    "cookies" is cookie+s, and the plural alone does not distinguish them.
+    Folding both endings to "i" sidesteps it — none of the results are words,
+    all of them are consistent, and consistency is the only property needed."""
+
+    def test_y_plurals_converge(self):
+        from voxeval.metrics import fold_plural
+        for singular, plural in [("berry", "berries"), ("fry", "fries"),
+                                 ("curry", "curries"), ("patty", "patties")]:
+            assert fold_plural(singular) == fold_plural(plural)
+
+    def test_ie_plurals_converge(self):
+        from voxeval.metrics import fold_plural
+        for singular, plural in [("cookie", "cookies"), ("pie", "pies")]:
+            assert fold_plural(singular) == fold_plural(plural)
+
+    def test_term_matching_finds_ies_plurals(self):
+        from voxeval.metrics import Term, term_recall
+        assert term_recall("a side of fries", [Term("fry")]).found == ["fry"]
+        assert term_recall("mixed berries", [Term("berry")]).found == ["berry"]
+
+    def test_still_not_prefix_matching(self):
+        from voxeval.metrics import Term, term_recall
+        assert not term_recall("a hamster wheel", [Term("ham")]).found

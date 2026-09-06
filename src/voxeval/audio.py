@@ -244,11 +244,16 @@ def iter_frames(
     all (see `StreamResult` — it never emits a final) and is still sensitive on
     short quiet audio.
 
-    So the honest rule is weaker and more useful: **short, quiet utterances are
-    fragile on every recognizer, and endpointing models are fragile on top of
-    that.** The defaults clear all three across every lead-in tested, which is the
-    only claim the data actually supports. Re-measure on a new provider rather
-    than reasoning from its architecture.
+    So the honest rule is weaker and more useful: **short, quiet utterances were
+    fragile on two of the three recognizers tested, and the endpointing one was
+    fragile on both fixtures.** The defaults clear all three across every lead-in
+    tested, which is the only claim the data supports. Three providers was enough
+    to falsify the clean architectural story two suggested, so re-measure on a new
+    one rather than reasoning from its category.
+
+    (ElevenLabs was tested at its default configuration — `model_id=
+    scribe_v2_realtime`, server VAD off. With server VAD enabled it does emit
+    finals, and its padding behaviour was not measured in that mode.)
 
     The cost is real time you were spending anyway, and it does not distort
     latency: finalization is measured from the end of real audio, so the trailing

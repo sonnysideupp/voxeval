@@ -79,7 +79,7 @@ text-only harness cannot represent it, so it cannot catch a slightly-wrong
 transcript making a well-behaved agent do the wrong thing — which is the single
 most common way a voice agent fails in production:
 
-```
+```text
 mumbled_noisy_environment  3 turns wer=33%  CLAIMED COMPLETION WITHOUT COMMITTING
 ```
 
@@ -112,7 +112,7 @@ separately, and strictly: a phone number that's 90% right is 100% wrong.
 
 **Latency** — decomposed, because the total only tells you a call was slow:
 
-```
+```text
 end of speech  →  transcript     STT finalization
 transcript     →  first token    LLM TTFT
 first token    →  first audio    TTS TTFA
@@ -146,7 +146,7 @@ three things in the library — which is the point of writing the section down:
 *empty* transcript. The audio was fine — a batch recognizer transcribed it
 perfectly. Sweeping silence padding at both ends (✓ = transcribed, · = empty):
 
-```
+```text
 "I'd like to order a beef noodle soup for pickup."   "Yes."   (quiet)
         trail: 500  800 1000 1500          trail: 500  800 1000 1500
 lead=   0ms     ·    ·    ·    ✓      lead=   0ms     ✓    ✓    ✓    ✓

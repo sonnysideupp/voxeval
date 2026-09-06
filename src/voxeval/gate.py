@@ -197,6 +197,12 @@ def default_gate() -> Gate:
              "wrong answer, which is worse than an obviously wrong one.",
     ))
     gate.add(Threshold(
+        "digit_accuracy", min_value=1.0, margin=0.0,
+        note="A spoken number came back wrong. Deliberately zero-margin: a phone "
+             "number that is 90% right is 100% wrong, because nobody is called "
+             "back. Same for an order number or a card digit.",
+    ))
+    gate.add(Threshold(
         "out_of_set_language_rate", max_value=0.0,
         note="Recognizer returned a language the agent does not support. It will "
              "act on a sentence nobody said.",
@@ -253,6 +259,12 @@ def default_gate() -> Gate:
     # good deploys, and a gate that does that gets switched off, taking the
     # deterministic checks above it along. Promote it only after measuring the
     # end-to-end spread on your own scenarios.
+    gate.add(Threshold(
+        "dead_air_events", max_value=0, margin=2.0, severity=Severity.WARN,
+        note="The caller waited past the dead-air threshold with nothing coming "
+             "back. WARN because the bar depends on your greeting and tool "
+             "latency; tighten it once you know your own distribution.",
+    ))
     gate.add(Threshold(
         "judge_score", min_value=70.0, margin=5.0, severity=Severity.WARN,
         note="Conversation quality below rubric. Read the reasoning before acting "

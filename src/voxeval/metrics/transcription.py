@@ -100,34 +100,77 @@ class TermRecallResult:
         return bool(self.collapsed)
 
 
+def _singular(token: str) -> str:
+    """Fold a trailing plural 's' so "spring roll" matches "spring rolls".
+
+    Applied to both sides, so it never needs to be *correct* English — only
+    consistent. "glass" keeps its double-s and "hamster" has no trailing s, which
+    is what stops this from undoing the token-boundary fix above: prefix matching
+    would make Term("ham") match "hamster" again.
+
+    Irregular plurals are not handled — "child"/"children", "leaf"/"leaves". They
+    are rare in the product nouns this metric guards, and the escape hatch is
+    already there: declare the other form in `Term.variants`.
+    """
+    # "-es" after a sibilant: glasses, boxes, dishes, sandwiches. Checked first,
+    # because "glass" ends in "ss" and the plain "-s" rule below leaves it alone.
+    if len(token) > 3 and token.endswith("es"):
+        stem = token[:-2]
+        if stem.endswith(("ss", "x", "z", "ch", "sh")):
+            return stem
+    if len(token) > 2 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
+    """Is this variant present as a whole token sequence?
+
+    Token-boundary matching, not substring. Plain `in` reports Term("ham") as
+    found in "champagne" and Term("tea") in "steak" — a false positive on the one
+    metric that exists to prove the transaction words survived. A false "found"
+    is worse than a miss, because it reads as success.
+
+    Multi-word terms still match inside longer utterances ("beef with broccoli"
+    within a full sentence); they just have to align to token boundaries.
+
+    Non-ASCII variants keep raw substring matching: normalization leaves CJK
+    untouched and `.split()` is meaningless for it, so "牛肉面" is one word to a
+    reader and several tokens to the tokenizer.
+    """
+    if not variant.isascii():
+        return variant in raw
+    needle = [_singular(t) for t in tokenize(variant)]
+    if not needle:
+        return False
+    haystack = [_singular(t) for t in hypothesis_tokens]
+    n = len(needle)
+    return any(
+        haystack[i:i + n] == needle
+        for i in range(len(haystack) - n + 1)
+    )
+
+
 def term_recall(hypothesis: str, terms: list[Term]) -> TermRecallResult:
     """Fraction of required terms that survived, plus any known collapses.
 
-    Matching is substring-based on the normalized text rather than token-exact,
-    because a multi-word term ("beef with broccoli") should be found inside a
-    longer utterance without requiring the caller to have said nothing else.
-
-    Non-Latin variants are also checked against the raw hypothesis, since
-    normalization strips nothing from CJK text but tokenization is meaningless for
-    it — "牛肉面" is one token to a human and several to `.split()`.
+    Matching is on whole token sequences — see `_matches` for why substring
+    matching is the wrong tool here.
     """
-    normalized = normalize(hypothesis)
     raw = hypothesis or ""
+    hypothesis_tokens = tokenize(hypothesis)
 
     found: list[str] = []
     missed: list[str] = []
     for term in terms:
-        hit = any(
-            normalize(v) in normalized or (not v.isascii() and v in raw)
-            for v in term.accepted()
-        )
+        hit = any(_matches(v, hypothesis_tokens, raw) for v in term.accepted())
         (found if hit else missed).append(term.name)
 
     collapsed = [
         c
         for term in terms
         for c in term.collapses
-        if normalize(c) in normalized or (not c.isascii() and c in raw)
+        if _matches(c, hypothesis_tokens, raw)
     ]
 
     total = len(terms)

@@ -93,3 +93,21 @@ class TestFalseCompletion:
             [],
             commit_tools=("confirmOrder",),
         )
+
+
+class TestArgumentKeyMustExist:
+    def test_absent_key_does_not_satisfy_an_expected_none(self):
+        # .get() returns None for a missing key, so {"confirmation_id": None}
+        # passed on a call that never carried the argument at all.
+        result = check_tool_calls(
+            [ToolCall("confirmOrder", {})],
+            ToolExpectation(argument_checks={"confirmOrder": {"confirmation_id": None}}),
+        )
+        assert not result.ok
+
+    def test_present_key_with_none_value_does_satisfy(self):
+        result = check_tool_calls(
+            [ToolCall("confirmOrder", {"confirmation_id": None})],
+            ToolExpectation(argument_checks={"confirmOrder": {"confirmation_id": None}}),
+        )
+        assert result.ok

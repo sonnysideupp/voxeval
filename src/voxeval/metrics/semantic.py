@@ -145,7 +145,15 @@ def semantic_normalize(
         # so strip it per-token for the lookup and keep the expansion.
         rebuilt: list[str] = []
         for raw in text.split():
-            stripped = raw.strip(".,!?;:")
+            # Quotes and brackets too, not just sentence punctuation: a token
+            # arriving as “can't” misses _CONTRACTIONS and degrades to "can t".
+            #
+            # The straight apostrophe is deliberately NOT in this set. Stripping
+            # it turns "'cause" into "cause", which is not in the map, so the
+            # expansion to "because" is lost — a fix for quoting that breaks
+            # elision. Curly quotes are stripped because they are almost always
+            # quotation; the straight one is more often a contraction marker.
+            stripped = raw.strip('.,!?;:"“”‘’()[]{}<>')
             rebuilt.append(_CONTRACTIONS.get(stripped, raw))
         text = " ".join(rebuilt)
 

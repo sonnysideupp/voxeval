@@ -124,7 +124,14 @@ def llm_judge(
             # model upgrade look like a regression.
             return Verdict(score=0.0, error=f"unparseable judge reply: {raw[:120]!r}", passed=True)
 
-        if payload.get("abstain"):
+        abstain = payload.get("abstain", False)
+        if not isinstance(abstain, bool):
+            # Raw truthiness reads the strings "false" and "no" as abstentions,
+            # and abstentions are dropped from the mean — so a model answering in
+            # the wrong type silently removes cases from the score.
+            return Verdict(score=0.0, passed=True,
+                           error=f"non-boolean abstain: {abstain!r}")
+        if abstain:
             return Verdict(score=0.0, error="judge abstained", passed=True)
 
         try:

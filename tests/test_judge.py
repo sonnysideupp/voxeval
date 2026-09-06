@@ -184,3 +184,22 @@ class TestRubricGuidance:
         # judgement, and an invented one is indistinguishable from a real one.
         from voxeval.judges import DEFAULT_TEMPLATE
         assert "abstain" in DEFAULT_TEMPLATE
+
+
+class TestAbstainMustBeBoolean:
+    def test_string_false_is_not_an_abstention(self):
+        # Raw truthiness read "false" as an abstention, and abstentions are
+        # dropped from the mean — so a wrong-typed field silently removed cases
+        # from the score.
+        from voxeval.judges import llm_judge
+        verdict = llm_judge(lambda p: '{"score": 88, "abstain": "false"}')("s", "e", "t")
+        assert verdict.errored, "non-boolean abstain is a malformed reply"
+
+    def test_real_boolean_abstain_still_works(self):
+        from voxeval.judges import llm_judge
+        assert llm_judge(lambda p: '{"score": 0, "abstain": true}')("s", "e", "t").errored
+
+    def test_missing_abstain_defaults_to_scoring(self):
+        from voxeval.judges import llm_judge
+        verdict = llm_judge(lambda p: '{"score": 88}')("s", "e", "t")
+        assert not verdict.errored and verdict.score == 88

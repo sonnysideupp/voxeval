@@ -40,7 +40,11 @@ from voxeval import (
 from voxeval.audio import iter_frames, realtime_schedule
 
 FRAME_MS = 20
-TRAILING_SILENCE_MS = 1500.0
+# 2500ms, matching voxeval.audio's measured default. 1500 sits *under* the
+# ~1720ms Flux takes to finalize a short quiet utterance, so the final never
+# arrives on its own — end_input() flushes it, and the latency you record is
+# your own padding rather than the recognizer's.
+TRAILING_SILENCE_MS = 2500.0
 
 
 def deepgram_flux(model: str = "flux-general-en", keyterms: list[str] | None = None):

@@ -61,3 +61,20 @@ class TestAnalyze:
         report = analyze([TurnLatency(end_to_end_ms=400), TurnLatency(end_to_end_ms=500)])
         assert report.end_to_end.count == 2
         assert report.vad_to_stt.count == 0
+
+
+class TestFractionalPercentiles:
+    def test_p99_9_is_not_truncated_to_p99(self):
+        # int(p) collapsed 99.9 to 99: on 100 samples that returns the 99th
+        # value, hiding the exact tail the caller asked about.
+        values = [float(i) for i in range(1, 101)]
+        assert percentile(values, 99.9) == 100.0
+        assert percentile(values, 99) == 99.0
+
+    def test_fractional_below_the_first_rank(self):
+        assert percentile([float(i) for i in range(1, 101)], 0.5) == 1.0
+
+    def test_integer_percentiles_are_unchanged(self):
+        values = [float(i) for i in range(1, 101)]
+        assert percentile(values, 50) == 50.0
+        assert percentile(values, 95) == 95.0

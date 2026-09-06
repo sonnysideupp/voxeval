@@ -20,6 +20,7 @@ exceed 3-5s, and it is that tail the caller remembers as dead air.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from statistics import median
 
@@ -63,7 +64,10 @@ def percentile(values: list[float], p: float) -> float | None:
     ordered = sorted(values)
     if p == 0:
         return ordered[0]
-    rank = max(1, min(len(ordered), -(-len(ordered) * int(p) // 100)))
+    # ceil(n * p / 100) on the float. Truncating p with int() first collapsed
+    # p99.9 to p99 — on 100 samples that returns the 99th value instead of the
+    # 100th, quietly hiding the exact tail a p99.9 was asked for.
+    rank = max(1, min(len(ordered), math.ceil(len(ordered) * p / 100)))
     return ordered[rank - 1]
 
 

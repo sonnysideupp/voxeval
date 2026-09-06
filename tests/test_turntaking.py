@@ -55,3 +55,15 @@ class TestTurnTaking:
     def test_unsorted_input_is_handled(self):
         report = analyze_turns([agent(1300, 2500), caller(0, 1000)])
         assert report.interruptions == 0
+
+
+class TestToleratedOverlapIsNotNegativeGap:
+    def test_small_overlap_clamps_to_zero(self):
+        # A tolerated overlap is not a negative wait. Letting -50ms into the mean
+        # reports a faster response time than any call actually had.
+        report = analyze_turns([
+            Utterance("caller", 0, 1000, "hi"),
+            Utterance("agent", 950, 2000, "hello"),
+        ], interruption_tolerance_ms=100.0)
+        assert report.mean_response_gap_ms is None or report.mean_response_gap_ms >= 0.0
+        assert report.longest_gap_ms >= 0.0

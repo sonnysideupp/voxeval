@@ -125,3 +125,19 @@ class TestMeaningPreserved:
     def test_threshold_is_honored(self, threshold):
         result = meaning_preserved("a b", "a b", threshold=threshold)
         assert result is (threshold <= 1.0)
+
+
+class TestQuotedContractions:
+    def test_curly_quoted_contraction_still_expands(self):
+        assert semantic_normalize('“can’t” do it') == "cannot do it"
+
+    def test_double_quoted_token(self):
+        assert semantic_normalize('"two" coffees') == "2 coffees"
+
+    def test_leading_apostrophe_elision_is_preserved(self):
+        # The straight apostrophe is deliberately not stripped: doing so turns
+        # "'cause" into "cause", losing the expansion to "because".
+        assert semantic_normalize("'cause I said so") == "because i said so"
+
+    def test_possessive_still_untouched(self):
+        assert semantic_normalize("General Tso's") == "general tso s"

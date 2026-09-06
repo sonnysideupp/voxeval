@@ -14,6 +14,8 @@ is visible in the text.
 pass/fail your deploy script can act on.
 
 ```python
+import sys
+
 from voxeval import Suite, TurnCase, Term
 
 suite = Suite()
@@ -185,6 +187,8 @@ does the rest.
 pushed at 1× real time with trailing silence, and each final is timestamped:
 
 ```python
+import time
+
 from voxeval import run_streaming, AudioCase, Term, StreamResult, Final, iter_frames, realtime_schedule
 
 def my_stt(audio):                      # AudioBuffer in, StreamResult out
@@ -213,6 +217,9 @@ quiet room and drops the product name over a busy dining room.
 satisfies it:
 
 ```python
+import sys
+from pathlib import Path
+
 from voxeval import run_audio, AudioCase, Term
 
 cases = [AudioCase(

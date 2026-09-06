@@ -107,3 +107,61 @@ class TestDigits:
 
     def test_missing_all_digits_scores_zero(self):
         assert digit_accuracy("617", "") == 0.0
+
+
+class TestTermMatchingIsTokenBounded:
+    """Substring matching reported Term("ham") as found in "champagne" — a false
+    positive on the metric whose whole job is proving the transaction words
+    survived. A false 'found' is worse than a miss: it reads as success."""
+
+    def test_short_term_does_not_match_inside_a_longer_word(self):
+        result = term_recall("a glass of champagne", [Term("ham")])
+        assert result.missed == ["ham"]
+
+    def test_term_still_matches_inside_a_longer_utterance(self):
+        result = term_recall(
+            "yes I want the beef with broccoli please", [Term("beef with broccoli")])
+        assert result.found == ["beef with broccoli"]
+
+    def test_exact_single_token(self):
+        assert term_recall("one ham sandwich", [Term("ham")]).found == ["ham"]
+
+    def test_collapse_detection_is_also_token_bounded(self):
+        term = Term("kung pao chicken", collapses=("compound chicken",))
+        assert not term_recall("compounding chicken stock", [term]).collapsed
+        assert term_recall("compound chicken please", [term]).collapsed
+
+    def test_non_ascii_keeps_substring_matching(self):
+        # CJK has no whitespace token boundaries; "牛肉面" is one word to a reader
+        # and several tokens to .split().
+        term = Term("beef noodle soup", variants=("牛肉面",))
+        assert term_recall("我想要牛肉面外带", [term]).found == ["beef noodle soup"]
+
+    def test_multiword_term_must_be_contiguous(self):
+        result = term_recall("beef and also broccoli", [Term("beef broccoli")])
+        assert result.missed == ["beef broccoli"]
+
+
+class TestPluralFolding:
+    """Token-boundary matching must not break the commonest legitimate variation.
+    Folding is symmetric, so it need not be correct English — only consistent."""
+
+    def test_regular_plural(self):
+        assert term_recall("two spring rolls", [Term("spring roll")]).found
+
+    def test_singular_hypothesis_plural_term(self):
+        assert term_recall("one spring roll", [Term("spring rolls")]).found
+
+    def test_es_plural_after_sibilant(self):
+        for hyp, term in [("two glasses", "glass"), ("three boxes", "box"),
+                          ("two dishes", "dish"), ("two sandwiches", "sandwich")]:
+            assert term_recall(hyp, [Term(term)]).found, f"{term} in {hyp}"
+
+    def test_es_rule_does_not_over_strip(self):
+        # "roses" must fold to "rose", not "ros" — the stem has to end in a real
+        # sibilant (ss/x/z/ch/sh), not a bare s.
+        assert term_recall("a dozen roses", [Term("rose")]).found
+
+    def test_folding_does_not_reintroduce_substring_matching(self):
+        assert not term_recall("a hamster wheel", [Term("ham")]).found
+        assert not term_recall("a glass of champagne", [Term("ham")]).found

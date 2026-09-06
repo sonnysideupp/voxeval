@@ -97,7 +97,11 @@ def check_tool_calls(calls: list[ToolCall], expected: ToolExpectation) -> ToolCa
         # Pass if ANY call to this tool satisfies the assertion — a model may call
         # a lookup tool several times before the one that matters.
         if not any(
-            all(call.arguments.get(k) == v for k, v in expected_args.items())
+            # `k in` first: .get() returns None for an absent key, so an
+            # assertion of {"confirmation_id": None} would pass on a call that
+            # never carried the argument at all.
+            all(k in call.arguments and call.arguments[k] == v
+                for k, v in expected_args.items())
             for call in matching
         ):
             got = [{k: c.arguments.get(k) for k in expected_args} for c in matching]

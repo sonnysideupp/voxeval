@@ -96,12 +96,18 @@ class TestStageLatenciesAreGated:
     """Regression: stt/llm/tts p95 were aggregated into metrics but no threshold
     consumed them, so a run could measure a 1.7s STT finalization and print PASS."""
 
-    def test_every_computed_latency_metric_has_a_threshold(self):
+    # Only metrics that are genuinely diagnostic belong here, and each needs a
+    # reason. Anything else that Suite computes must be gated, or a regression in
+    # it prints PASS.
+    DIAGNOSTIC_ONLY = {
+        # Reported for context alongside `wer`; gating both double-counts the
+        # same underlying failure and makes the pair harder to read.
+        "semantic_similarity",
+    }
+
+    def test_every_computed_metric_has_a_threshold(self):
         from voxeval import Suite, default_gate
-        computed = {
-            k for k in Suite().run().metrics
-            if k.endswith("_ms") and not k.startswith("barge_in")
-        }
+        computed = set(Suite().run().metrics) - self.DIAGNOSTIC_ONLY
         gated = {t.name for t in default_gate()._thresholds}
         assert computed <= gated, f"computed but ungated: {sorted(computed - gated)}"
 
@@ -115,3 +121,23 @@ class TestStageLatenciesAreGated:
         from voxeval import default_gate
         result = default_gate().check({"stt_p95_ms": 250.0})
         assert not any(w.threshold.name == "stt_p95_ms" for w in result.warnings)
+
+
+class TestNewlyGatedMetrics:
+    """digit_accuracy and dead_air_events were computed and gated by nothing, so a
+    wrong phone number or a silent caller-wait could still print PASS."""
+
+    def test_wrong_digits_block_the_deploy(self):
+        from voxeval import default_gate
+        result = default_gate().check({"digit_accuracy": 0.9})
+        assert not result.passed, "a 90%-right phone number is 100% wrong"
+
+    def test_perfect_digits_pass(self):
+        from voxeval import default_gate
+        assert default_gate().check({"digit_accuracy": 1.0}).passed
+
+    def test_dead_air_warns_without_blocking(self):
+        from voxeval import default_gate
+        result = default_gate().check({"dead_air_events": 5})
+        assert result.passed, "dead-air bar is deployment-specific; WARN only"
+        assert any(w.threshold.name == "dead_air_events" for w in result.warnings)

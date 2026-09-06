@@ -124,7 +124,11 @@ def analyze_turns(
                 if recovery > 500.0:
                     report.unrecovered_barge_ins += 1
         else:
-            gap = curr.start_ms - prev.end_ms
+            # Clamped at zero: an overlap small enough to fall under the tolerance
+            # is not a negative wait. Letting -50ms into the mean makes a suite
+            # with a few tight hand-offs report a faster response time than any
+            # call actually had.
+            gap = max(0.0, curr.start_ms - prev.end_ms)
             report.longest_gap_ms = max(report.longest_gap_ms, gap)
             if curr.speaker == "agent":
                 # Only caller→agent gaps are response latency. An agent→caller gap

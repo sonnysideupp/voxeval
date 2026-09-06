@@ -92,6 +92,15 @@ def llm_judge(
 ) -> Judge:
     """Build a `Judge` from any prompt-in / text-out function.
 
+    A note on pinning sampling: `temperature=0` is the usual way to make a judge
+    reproducible, and it works — but some newer models no longer accept the
+    parameter at all (claude-sonnet-5 returns "`temperature` is deprecated for
+    this model" and fails the request). If your `complete` passes temperature
+    unconditionally, that surfaces here as an errored verdict on *every* case:
+    quiet, total loss of the metric rather than a crash. Catch it, retry without,
+    and re-measure the score spread — on a model whose sampling you cannot pin,
+    reproducibility is no longer free.
+
     Abstentions come back as errored verdicts, which the suite excludes from the
     mean instead of averaging in as a zero. That distinction matters: a judge
     that could not evaluate three cases is a coverage gap, while three genuine

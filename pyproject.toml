@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voxeval"
+version = "0.1.0"
+description = "Evaluate voice agents, not just the text they produce."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["voice-ai", "evaluation", "llm", "speech-to-text", "agents", "testing"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+
+# No runtime dependencies, on purpose. Every metric is pure Python, so the
+# library installs anywhere, runs in CI without credentials, and its own tests
+# need no network. Provider SDKs belong in the harness that produces traces,
+# not in the library that scores them.
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.6", "mypy>=1.11"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voxeval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Inline fixtures in tests read better on one line than wrapped.
+"tests/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+# Protocol __call__ signatures with union returns trip strict mode on callers
+# passing bare lambdas, which is the ergonomic the adapters exist to provide.
+warn_return_any = false

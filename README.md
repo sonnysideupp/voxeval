@@ -127,9 +127,20 @@ lead= 200ms     ·    ·    ✓    ✓      lead= 200ms     ·    ✓    ✓    
 lead= 500ms     ✓    ✓    ✓    ✓      lead= 500ms     ·    ·    ·    ✓
 ```
 
-The two clips want *opposite* lead-ins, and lead-in isn't even monotonic. Only
-trailing silence ≥1500ms satisfies both, which is now the default. Under-pad and
-you publish "this recognizer silently drops routine sentences" and you're wrong.
+The two clips want *opposite* lead-ins, and lead-in isn't even monotonic. Under-pad
+and you publish "this recognizer silently drops routine sentences" and you're wrong.
+
+The default trailing pad is 2500ms, not 1500ms, for a subtler reason. The quiet
+clip's finalization latency was measured at ~1720ms — *longer than 1500ms of
+padding*. At 1500ms the final never arrived naturally; the transcript only
+appeared because closing the stream flushed it. **If a fixture's latency lands
+near your padding, that's the reading to distrust first.**
+
+Running the same sweep against **Soniox stt-rt-v4** transcribed everything at
+every combination — no failures anywhere. That difference is the useful part:
+Flux is a *turn-taking* model that must observe silence to decide a turn ended,
+while Soniox is conventional streaming ASR that transcribes whatever arrives.
+Endpointing models are the ones that go silent when under-padded.
 
 **Latency the transcript can't show.** All seven fixtures transcribed perfectly —
 WER 0.00, term recall 1.00. But finalization latency ran a 583ms median with
@@ -356,11 +367,11 @@ CI runs all three on Python 3.10–3.13.
 
 Worth stating plainly rather than discovering later:
 
-* **Validated against one recognizer, not many.** The streaming path has been run
-  end-to-end against Deepgram Flux (see above), which is what produced the padding
-  defaults. Soniox, Whisper and Google have not been exercised, and the padding
-  frontier is very likely different for each — re-measure before trusting the
-  defaults on a new provider.
+* **Validated against two recognizers, not many.** The streaming path has been run
+  end-to-end against Deepgram Flux (which produced the padding defaults) and
+  Soniox stt-rt-v4 (which is insensitive to them). Whisper, Google and
+  Speechmatics have not been exercised. Re-measure on a new provider — especially
+  an endpointing one.
 * **Semantic normalization is English-only.** The contraction map, disfluency list
   and spoken-number folding are English. `semantic_wer` degrades to ordinary WER
   on other languages rather than failing, but it will not help there. Term recall

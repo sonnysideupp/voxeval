@@ -4,8 +4,8 @@ Deterministic checks answer "did the agent do the right thing". A judge answers
 "was it any good". Run both: the deterministic checks block the deploy, the judge
 warns.
 
-    pip install voxeval anthropic
-    export ANTHROPIC_API_KEY=...
+    pip install voxeval google-genai
+    export GOOGLE_API_KEY=...
     python examples/judged_scenarios.py
 
 Two rules, both learned by getting them wrong against a live agent:
@@ -35,25 +35,28 @@ from voxeval import (
 )
 
 
-def anthropic_judge():
+def gemini_judge(model: str = "gemini-3.1-flash-lite"):
     """Wrap any provider in a prompt-in / text-out function.
+
+    `llm_judge` only needs `str -> str`, so swapping providers is this function and
+    nothing else — no library change, no adapter class.
 
     Temperature 0 matters: at 0 the judge reproduces exactly (the same transcript
     scored identically eight times out of eight in testing). Score movement then
     means the *agent* changed, which is the signal you want.
     """
-    from anthropic import Anthropic
+    from google import genai
+    from google.genai import types
 
-    client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
     def complete(prompt: str) -> str:
-        reply = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=600,
-            temperature=0.0,
-            messages=[{"role": "user", "content": prompt}],
+        reply = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=600),
         )
-        return reply.content[0].text
+        return reply.text or ""
 
     return llm_judge(complete)
 
@@ -84,24 +87,37 @@ SCENARIOS = [
 ]
 
 
+# Canned replies so the example runs without an agent. Note they are keyed by the
+# caller's turn: a stub that ignores `caller_turns` and returns one fixed trace
+# will score every scenario against the same transcript and report a confident,
+# meaningless 100.
+_STUB = {
+    "I'd like this delivered to my house, please.": (
+        "I'm sorry, we're pickup only — but I can have it ready for you in about "
+        "twenty minutes if you'd like to come by."
+    ),
+    "Can I get the lobster thermidor?": (
+        "We don't have lobster thermidor, I'm afraid. Our seafood dish today is the "
+        "salt and pepper shrimp — would you like that instead?"
+    ),
+}
+
+
 def my_agent(caller_turns) -> CallTrace:
     """Replace with a call into your own agent.
 
     Returning a `CallTrace` is usually reshaping logs you already have rather than
     instrumenting anything new.
     """
+    opening = caller_turns[0]
     return CallTrace(
-        transcript=(
-            "Customer: I'd like this delivered to my house, please.\n"
-            "Agent: I'm sorry, we're pickup only — but I can have it ready for you "
-            "in about twenty minutes if you'd like to come by."
-        ),
+        transcript=f"Customer: {opening}\nAgent: {_STUB[opening]}",
         tool_calls=[ToolCall(name="checkHours")],
     )
 
 
 if __name__ == "__main__":
-    report = run_scenarios(SCENARIOS, my_agent, judge=anthropic_judge())
+    report = run_scenarios(SCENARIOS, my_agent, judge=gemini_judge())
     print(report)
     print()
 

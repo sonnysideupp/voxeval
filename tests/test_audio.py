@@ -179,9 +179,10 @@ class TestLeadingSilence:
         from voxeval.audio import iter_frames
         params = inspect.signature(iter_frames).parameters
         assert params["leading_silence_ms"].default >= 500
-        # 1500ms is where both measured fixtures pass at every lead-in tested.
-        # Below it the two disagree and there is no setting that satisfies both.
-        assert params["trailing_silence_ms"].default >= 1500
+        # Must exceed the slowest measured finalization (~1720ms for a short
+        # quiet utterance), or the final never arrives naturally and the run is
+        # timing its own stream close rather than the recognizer.
+        assert params["trailing_silence_ms"].default >= 2000
 
     def test_lead_in_frames_are_silent(self):
         import array
@@ -208,3 +209,16 @@ class TestLeadingSilence:
             joined.extend(array.array("h", f))
         lead = 60 * 16   # samples at 16kHz
         assert list(joined[lead:lead + len(src.samples)]) == list(src.samples)
+
+
+class TestPaddingExceedsFinalizationLatency:
+    def test_trailing_pad_clears_the_slowest_measured_finalization(self):
+        # Deepgram Flux finalized a short quiet "Yes." at ~1720ms. A 1500ms pad
+        # sat *under* that, so the transcript only appeared when end_input()
+        # flushed it — intermittently. The default must clear it with headroom.
+        import inspect
+
+        from voxeval.audio import iter_frames
+        slowest_observed_ms = 1720
+        default = inspect.signature(iter_frames).parameters["trailing_silence_ms"].default
+        assert default > slowest_observed_ms

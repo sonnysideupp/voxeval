@@ -170,7 +170,7 @@ def concat(*buffers: AudioBuffer) -> AudioBuffer:
 def iter_frames(
     buffer: AudioBuffer,
     frame_ms: int = 20,
-    trailing_silence_ms: float = 1500.0,
+    trailing_silence_ms: float = 2500.0,
     leading_silence_ms: float = 500.0,
 ) -> Iterator[bytes]:
     """Yield fixed-size PCM frames, padded with silence at both ends.
@@ -205,8 +205,19 @@ def iter_frames(
     you do:
 
     1. **Trailing silence is the dominant variable.** At 1500ms both fixtures pass
-       at every lead-in tested. That is why the default is 1500 and why lead-in is
-       the smaller knob.
+       at every lead-in tested, which is why lead-in is the smaller knob.
+
+       The default is 2500ms rather than 1500 for a reason worth understanding,
+       because it is the trap underneath this whole section. Finalization latency
+       for the quiet clip was measured at ~1720ms — *longer than 1500ms of
+       padding*. So at 1500ms the recognizer never emits its final naturally; the
+       transcript only appears because closing the stream flushes it, which works
+       until it doesn't. Feeding 3000ms and 5000ms of silence produced the same
+       ~1720ms, arriving well before the stream closed — the model's real number.
+
+       **Your trailing pad must exceed the slowest finalization you expect, or you
+       are measuring your own timeout.** If a fixture's latency lands suspiciously
+       near your padding, that is the reading to distrust first.
     2. **The two clips disagree about everything else.** The first needs *more*
        lead-in, the second needs *less*; there is no low-padding setting that
        satisfies both. Tuning pads per fixture until the suite goes green is
@@ -219,6 +230,16 @@ def iter_frames(
     reported as an empty transcript. A harness padded at 200/500 would have
     published "this recognizer silently drops routine sentences" and been wrong.
     That is the whole reason these defaults are generous.
+
+    **This sensitivity is not universal, and knowing which kind of model you have
+    tells you whether to care.** The same sweep against Soniox stt-rt-v4
+    transcribed both fixtures at every padding combination — no · anywhere. Flux
+    is a *turn-taking* model: it decides when a turn ended, so it needs to observe
+    silence resolve into speech and back. Soniox is conventional streaming ASR: it
+    transcribes what arrives and leaves turn boundaries to you. Endpointing models
+    are the ones that go silent when under-padded. The generous defaults cost
+    conventional recognizers nothing but wall-clock, which is why they are the
+    default for both.
 
     The cost is real time you were spending anyway, and it does not distort
     latency: finalization is measured from the end of real audio, so the trailing

@@ -63,6 +63,31 @@ transaction survive? Dish names, street names, drug names, part numbers. Declare
 accepted `variants` (orthography and script differences aren't errors) and known
 `collapses` (specific mis-hears worth failing on by name).
 
+**Voice multi-turn, in one abstraction with text** — a `Turn` carries what the
+caller *said*, what the recognizer *heard*, what the agent replied, and what it
+did. Voice and text differ in exactly one thing:
+
+```python
+Turn(spoken="one kung pao chicken", heard="one compound chicken", ...)   # voice
+Turn(spoken="one kung pao chicken", agent_said="Sure.")                  # text
+```
+
+Everything downstream — tool traces, latency, judging, turn-taking — is identical.
+Transcription metrics switch on precisely when there is a gap to measure, so the
+same `ConversationCase` runs for both. **That gap is why this library exists.** A
+text-only harness cannot represent it, so it cannot catch a slightly-wrong
+transcript making a well-behaved agent do the wrong thing — which is the single
+most common way a voice agent fails in production:
+
+```
+mumbled_noisy_environment  3 turns wer=33%  CLAIMED COMPLETION WITHOUT COMMITTING
+```
+
+The noisiest call is the one where the agent told the caller their order was
+placed and never called the tool. The judge scored that conversation 65/100 — for
+an unrelated reason. It never noticed the phantom order, because the transcript
+reads like a successful call. Only the tool trace caught it.
+
 **Semantic scoring** — WER compares strings; callers and recognizers disagree
 about strings for reasons that don't matter. `"I'd like two coffees at six thirty"`
 vs `"I would like 2 coffees at 6:30"` is a *perfect* transcription and a 50% WER.
@@ -368,11 +393,7 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/mypy src/voxeval     # strict, clean
 ```
 
-A CI workflow is configured for Python 3.10–3.13, but **it has not been executed
-yet** — the repo has no remote, so nothing has run it. Locally, the suite has only
-been run on 3.14. The source parses under 3.10 grammar and uses no version-gated
-stdlib, so it should be fine; "should be" is the honest word until the matrix
-actually goes green.
+CI runs the tests, ruff and mypy on Python 3.10, 3.11, 3.12 and 3.13. Green on all four.
 
 ### Known limitations
 
@@ -387,6 +408,12 @@ Worth stating plainly rather than discovering later:
   and spoken-number folding are English. `semantic_wer` degrades to ordinary WER
   on other languages rather than failing, but it will not help there. Term recall
   and script detection are language-agnostic and remain the better tools.
+* **Term matching folds English plurals only.** `Term("spring roll")` matches
+  "spring rolls" and `Term("glass")` matches "glasses", but irregular plurals
+  ("leaf"/"leaves") and non-English morphology are not handled. The escape hatch
+  is explicit `Term.variants`. Matching is on token boundaries, so `Term("ham")`
+  will not match "champagne" — an earlier substring version did, reporting a term
+  as found when it was never spoken.
 * **Number folding is deliberately shallow.** "twenty five" folds to 25; "one
   hundred and twenty three" does not. A wrong fold invents an error in a quantity,
   which is worse than leaving two tokens unmatched.

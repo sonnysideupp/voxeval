@@ -361,7 +361,11 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/mypy src/voxeval     # strict, clean
 ```
 
-CI runs all three on Python 3.10–3.13.
+A CI workflow is configured for Python 3.10–3.13, but **it has not been executed
+yet** — the repo has no remote, so nothing has run it. Locally, the suite has only
+been run on 3.14. The source parses under 3.10 grammar and uses no version-gated
+stdlib, so it should be fine; "should be" is the honest word until the matrix
+actually goes green.
 
 ### Known limitations
 

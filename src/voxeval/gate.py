@@ -181,6 +181,17 @@ def default_gate() -> Gate:
         note="Margin is ~1 token on a short utterance; a real regression moves more.",
     ))
     gate.add(Threshold(
+        "semantic_wer", max_value=0.12, margin=0.04,
+        note="Errors survived contraction/number/filler normalization, so the "
+             "recognizer lost actual words rather than just formatting.",
+    ))
+    gate.add(Threshold(
+        "semantic_similarity", min_value=0.80, margin=0.05,
+        severity=Severity.WARN,
+        note="Meaning drifted from the reference. Non-deterministic if backed by "
+             "a model — calibrate before promoting to FAIL.",
+    ))
+    gate.add(Threshold(
         "collapses", max_value=0, severity=Severity.FAIL,
         note="A known mis-hear reappeared — the recognizer produced a plausible "
              "wrong answer, which is worse than an obviously wrong one.",
@@ -210,5 +221,21 @@ def default_gate() -> Gate:
         "claimed_without_commit", max_value=0,
         note="Agent said the task was done without calling the tool that does it. "
              "The caller believes they have a booking that does not exist.",
+    ))
+    # WARN, not FAIL. Not because the judge is unstable — at temperature 0 it
+    # reproduces exactly — but because it sits downstream of the agent's own
+    # sampling, which is not stable: one scenario scored 40, 65 and 100 across
+    # three runs purely from the agent behaving differently. A FAIL here blocks
+    # good deploys, and a gate that does that gets switched off, taking the
+    # deterministic checks above it along. Promote it only after measuring the
+    # end-to-end spread on your own scenarios.
+    gate.add(Threshold(
+        "judge_score", min_value=70.0, margin=5.0, severity=Severity.WARN,
+        note="Conversation quality below rubric. Read the reasoning before acting "
+             "— judges are non-deterministic and this is advisory.",
+    ))
+    gate.add(Threshold(
+        "judge_pass_rate", min_value=0.80, margin=0.10, severity=Severity.WARN,
+        note="Several conversations fell below the rubric bar.",
     ))
     return gate

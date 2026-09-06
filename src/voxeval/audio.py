@@ -71,6 +71,28 @@ def load_wav(path: Path | str) -> AudioBuffer:
         return AudioBuffer(samples, wf.getframerate())
 
 
+def load_pcm(path: Path | str, sample_rate: int) -> AudioBuffer:
+    """Read headerless 16-bit mono PCM.
+
+    This is the format telephony actually carries — a WAV header is a file-format
+    convenience that never exists on the wire. Twilio, LiveKit and every SIP
+    bridge hand you bare PCM, so fixtures captured from a real call are usually
+    headerless and the sample rate is something you know rather than something
+    the file states.
+
+    Which is why `sample_rate` is required and not guessed. Reading 8kHz call
+    audio as 16kHz produces a file that plays at double speed and transcribes as
+    gibberish, and the failure looks like a broken recognizer rather than a
+    broken loader.
+    """
+    raw = Path(path).read_bytes()
+    if len(raw) % 2:
+        raise ValueError(f"{path}: odd byte count ({len(raw)}) — not 16-bit PCM")
+    samples = array.array("h")
+    samples.frombytes(raw)
+    return AudioBuffer(samples, sample_rate)
+
+
 def save_wav(path: Path | str, buffer: AudioBuffer) -> None:
     """Write a mono 16-bit WAV. Useful for saving the mixed/denoised audio a
     failing case produced, so you can listen to what the recognizer heard."""
@@ -148,23 +170,71 @@ def concat(*buffers: AudioBuffer) -> AudioBuffer:
 def iter_frames(
     buffer: AudioBuffer,
     frame_ms: int = 20,
-    trailing_silence_ms: float = 500.0,
+    trailing_silence_ms: float = 1500.0,
+    leading_silence_ms: float = 500.0,
 ) -> Iterator[bytes]:
-    """Yield fixed-size PCM frames, padded with trailing silence.
+    """Yield fixed-size PCM frames, padded with silence at both ends.
 
     20ms is the frame size WebRTC and most telephony stacks use, so it is what a
     recognizer expects to receive.
 
-    The trailing silence is not optional padding — it is how a turn-taking model
-    learns the turn ended. Without it, endpointing recognizers hold the final
-    indefinitely and the case looks like a total transcription failure when the
-    audio was fine. Increase it for models that need a longer end-of-turn window.
+    **The padding is not cosmetic.** A turn-taking model decides a turn happened
+    by watching silence resolve into speech and back again. On a real call it
+    always sees both: the media stream is open and carrying room tone before the
+    caller speaks and after they stop. Hand it a bare clip and it may never
+    register a turn at all — returning nothing, which is indistinguishable from a
+    total transcription failure.
+
+    The defaults are measured, not chosen. Two TTS fixtures streamed through
+    Deepgram Flux, sweeping both pads (✓ = transcribed, · = empty):
+
+        "I'd like to order a beef noodle soup for pickup."  (1.9s, loud)
+                    trail:  500ms  800ms  1000ms  1500ms  2000ms
+        lead=   0ms            ·      ·       ·       ✓       ✓
+        lead= 200ms            ·      ·       ✓       ✓       ✓
+        lead= 500ms            ✓      ✓       ✓       ✓       ✓
+
+        "Yes."                                             (0.7s, quiet)
+                    trail:  500ms  800ms  1000ms  1500ms  2000ms
+        lead=   0ms            ✓      ✓       ✓       ✓       ✓
+        lead= 200ms            ·      ✓       ✓       ✓       ✓
+        lead= 500ms            ·      ·       ·       ✓       ✓
+        lead=1000ms            ✓      ✓       ✓       ✓       ✓
+
+    Three things to take from this, in order of how much they should change what
+    you do:
+
+    1. **Trailing silence is the dominant variable.** At 1500ms both fixtures pass
+       at every lead-in tested. That is why the default is 1500 and why lead-in is
+       the smaller knob.
+    2. **The two clips disagree about everything else.** The first needs *more*
+       lead-in, the second needs *less*; there is no low-padding setting that
+       satisfies both. Tuning pads per fixture until the suite goes green is
+       therefore fitting noise, not measuring a recognizer.
+    3. **Lead-in is not monotonic** — 500ms is worse than both 0 and 1000 for the
+       quiet clip. Whatever the mechanism, it is not a budget you can reason your
+       way to. Pick a setting with headroom and stop touching it.
+
+    Every · above is a healthy clip that a batch recognizer transcribed perfectly,
+    reported as an empty transcript. A harness padded at 200/500 would have
+    published "this recognizer silently drops routine sentences" and been wrong.
+    That is the whole reason these defaults are generous.
+
+    The cost is real time you were spending anyway, and it does not distort
+    latency: finalization is measured from the end of real audio, so the trailing
+    pad only gives the recognizer room to answer.
+
+    Set either to 0 only when deliberately testing the unpadded edge.
     """
     frame_samples = int(buffer.sample_rate * frame_ms / 1000)
     if frame_samples <= 0:
         raise ValueError("frame_ms too small for this sample rate")
 
-    padded = concat(buffer, silence(trailing_silence_ms, buffer.sample_rate))
+    padded = concat(
+        silence(leading_silence_ms, buffer.sample_rate),
+        buffer,
+        silence(trailing_silence_ms, buffer.sample_rate),
+    )
     total = len(padded.samples)
     for start in range(0, total, frame_samples):
         chunk = padded.samples[start:start + frame_samples]

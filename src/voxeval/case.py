@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .metrics.judge import Judge, Verdict, safe_judge
 from .metrics.language import LanguageCheck, check_language
 from .metrics.latency import TurnLatency
+from .metrics.semantic import Similarity, semantic_wer
 from .metrics.tools import (
     ToolCall,
     ToolCallResult,
@@ -52,6 +54,14 @@ class TurnCase:
     latency: TurnLatency | None = None
     languages: list[str] | None = None
     confidence: float | None = None
+    similarity: Similarity | None = None
+    """Optional meaning-equivalence scorer for genuine paraphrase.
+
+    Leave unset for recognizer evaluation: a transcriber is supposed to reproduce
+    the words, so `semantic_wer` already answers the question and costs nothing.
+    Set it when the "reference" is an intent rather than a script — an agent that
+    may legitimately answer "we close at nine" or "nine PM, last order eight
+    thirty" cannot be scored by edit distance against either one."""
     score_wer: bool = True
     """Set False when WER is a known-invalid metric for this utterance.
 
@@ -69,6 +79,20 @@ class TurnCase:
             wer=(
                 word_error_rate(self.reference, self.hypothesis)
                 if self.reference and self.score_wer
+                else None
+            ),
+            # Always computed alongside raw WER when a reference exists: it is
+            # deterministic and free, and the pair is what makes either one
+            # readable. Raw WER alone cannot distinguish "the recognizer wrote
+            # 6:30 instead of six thirty" from "the recognizer lost the time".
+            semantic_wer=(
+                semantic_wer(self.reference, self.hypothesis)
+                if self.reference and self.score_wer
+                else None
+            ),
+            similarity=(
+                self.similarity(self.reference, self.hypothesis)
+                if self.similarity is not None and self.reference
                 else None
             ),
             terms=term_recall(self.hypothesis, self.terms) if self.terms else None,
@@ -89,6 +113,8 @@ class TurnCase:
 class TurnResult:
     case: TurnCase
     wer: float | None = None
+    semantic_wer: float | None = None
+    similarity: float | None = None
     terms: TermRecallResult | None = None
     digits: float | None = None
     language: LanguageCheck | None = None
@@ -106,6 +132,12 @@ class TurnResult:
         bits = [f"{self.case.id}"]
         if self.wer is not None:
             bits.append(f"wer={self.wer:.0%}")
+        if self.semantic_wer is not None and self.semantic_wer != self.wer:
+            # Only shown when it differs — printing an identical number twice
+            # trains the reader to skip the column that matters.
+            bits.append(f"sem_wer={self.semantic_wer:.0%}")
+        if self.similarity is not None:
+            bits.append(f"sim={self.similarity:.2f}")
         if self.terms is not None:
             total = len(self.terms.found) + len(self.terms.missed)
             bits.append(f"terms={len(self.terms.found)}/{total}")
@@ -129,10 +161,30 @@ class ConversationCase:
     utterances: list[Utterance] = field(default_factory=list)
     latencies: list[TurnLatency] = field(default_factory=list)
 
+    judge: Judge | None = None
+    """Optional model-based scorer for conversation quality."""
+    scenario: str = ""
+    """What the caller was trying to do, in one line. Given to the judge."""
+    expected_behavior: str = ""
+    """What a good agent does here, in plain language — the rubric.
+
+    Write it as observable behaviour ("quotes a price only if it appears in the
+    menu context"), not as a vibe ("is helpful"). A vague rubric is the main
+    reason LLM judges score the same transcript 85 one run and 61 the next, and
+    that variance lands on your deploy gate."""
+
     def evaluate(self) -> ConversationResult:
         commit_tools = self.expected_tools.commit_tools if self.expected_tools else ()
         return ConversationResult(
             case=self,
+            # Judged only when a rubric exists. Asking a model "was this good?"
+            # with nothing to compare against produces a number that drifts with
+            # the model version and measures nothing.
+            verdict=(
+                safe_judge(self.judge, self.scenario, self.expected_behavior, self.transcript)
+                if self.judge is not None and self.expected_behavior
+                else None
+            ),
             tools=(
                 check_tool_calls(self.tool_calls, self.expected_tools)
                 if self.expected_tools
@@ -152,9 +204,15 @@ class ConversationResult:
     tools: ToolCallResult | None = None
     turn_taking: TurnTakingReport | None = None
     false_completion: bool = False
+    verdict: Verdict | None = None
 
     @property
     def ok(self) -> bool:
+        """Deliberately ignores the judge.
+
+        A conversation is not "failed" because a model scored it 68. The judge
+        feeds an aggregate that the gate treats as a WARN; letting it flip a
+        per-case boolean would make individual results non-reproducible."""
         if self.false_completion:
             return False
         return not (self.tools and not self.tools.ok)
@@ -167,4 +225,6 @@ class ConversationResult:
             bits.append("CLAIMED COMPLETION WITHOUT COMMITTING")
         if self.turn_taking:
             bits.append(str(self.turn_taking))
+        if self.verdict is not None:
+            bits.append(str(self.verdict))
         return "  ".join(bits)

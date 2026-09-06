@@ -27,7 +27,9 @@ from typing import Protocol, runtime_checkable
 from .audio import AudioBuffer
 from .case import ConversationCase, TurnCase
 from .gate import Gate
+from .metrics.judge import Judge
 from .metrics.latency import TurnLatency
+from .metrics.semantic import Similarity
 from .metrics.tools import ToolCall, ToolExpectation
 from .metrics.transcription import Term
 from .metrics.turntaking import Utterance
@@ -155,6 +157,7 @@ class AudioCase:
     terms: list[Term] = field(default_factory=list)
     languages: list[str] | None = None
     score_wer: bool = True
+    similarity: Similarity | None = None
 
 
 @dataclass
@@ -164,6 +167,12 @@ class Scenario:
     id: str
     caller_turns: Sequence[str]
     expected_tools: ToolExpectation | None = None
+    description: str = ""
+    """What the caller wants, in one line. Passed to the judge as context."""
+    expected_behavior: str = ""
+    """The rubric for this scenario. Without it the scenario is not judged at
+    all — see `ConversationCase.expected_behavior` for why a shared generic
+    rubric is worse than none."""
 
 
 def run_audio(cases: Sequence[AudioCase], transcriber: Transcriber) -> SuiteReport:
@@ -188,6 +197,7 @@ def run_audio(cases: Sequence[AudioCase], transcriber: Transcriber) -> SuiteRepo
             latency=transcription.latency,
             confidence=transcription.confidence,
             score_wer=case.score_wer,
+            similarity=case.similarity,
         ))
     return suite.run()
 
@@ -233,15 +243,25 @@ def run_streaming(
             latency=latency,
             confidence=result.mean_confidence,
             score_wer=case.score_wer,
+            similarity=case.similarity,
         ))
     return suite.run()
 
 
-def run_scenarios(scenarios: Sequence[Scenario], agent: Agent) -> SuiteReport:
+def run_scenarios(
+    scenarios: Sequence[Scenario],
+    agent: Agent,
+    judge: Judge | None = None,
+) -> SuiteReport:
     """Run each scripted conversation against the agent and score the traces.
 
         report = run_scenarios(scenarios, my_agent_replay)
         sys.exit(report.gate().exit_code())
+
+    Pass `judge` to add model-based quality scoring on top of the deterministic
+    checks. Only scenarios that define `expected_behavior` are judged, so you can
+    add a rubric to the handful of cases where quality is the question and leave
+    the rest checked by tool trace alone — which is cheaper and more reliable.
     """
     suite = Suite("scenarios")
     for scenario in scenarios:
@@ -253,6 +273,9 @@ def run_scenarios(scenarios: Sequence[Scenario], agent: Agent) -> SuiteReport:
             expected_tools=scenario.expected_tools,
             utterances=trace.utterances,
             latencies=trace.latencies,
+            judge=judge,
+            scenario=scenario.description,
+            expected_behavior=scenario.expected_behavior,
         ))
     return suite.run()
 

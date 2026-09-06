@@ -185,6 +185,7 @@ class TestMetricKeysAreStable:
         "end_to_end_p50_ms", "end_to_end_p95_ms", "stt_p95_ms", "llm_ttft_p95_ms",
         "tts_ttfa_p95_ms", "barge_in_recovery_p95_ms", "tool_call_failures",
         "duplicate_commits", "claimed_without_commit", "dead_air_events",
+        "semantic_wer", "semantic_similarity", "judge_score", "judge_pass_rate",
     }
 
     def test_empty_suite_still_has_every_key(self):

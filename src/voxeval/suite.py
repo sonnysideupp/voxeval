@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 from .case import ConversationCase, ConversationResult, TurnCase, TurnResult
 from .gate import Gate, GateResult, default_gate
+from .metrics.judge import JudgeReport
 from .metrics.latency import LatencyReport, analyze, percentile
 
 
@@ -30,6 +31,7 @@ class SuiteReport:
     turns: list[TurnResult] = field(default_factory=list)
     conversations: list[ConversationResult] = field(default_factory=list)
     latency: LatencyReport | None = None
+    judge: JudgeReport | None = None
     metrics: dict[str, float | None] = field(default_factory=dict)
 
     @property
@@ -54,6 +56,8 @@ class SuiteReport:
         if self.latency and self.latency.end_to_end.count:
             lines.append("\nLatency:")
             lines.append(str(self.latency))
+        if self.judge and self.judge.verdicts:
+            lines.append(f"\n{self.judge}")
         return "\n".join(lines)
 
 
@@ -88,12 +92,14 @@ class Suite:
         for conv in self._conversations:
             all_latencies.extend(conv.latencies)
         latency = analyze(all_latencies) if all_latencies else None
+        judge = JudgeReport([c.verdict for c in conversations if c.verdict is not None])
 
         return SuiteReport(
             turns=turns,
             conversations=conversations,
             latency=latency,
-            metrics=self._aggregate(turns, conversations, latency),
+            judge=judge,
+            metrics=self._aggregate(turns, conversations, latency, judge),
         )
 
     @staticmethod
@@ -101,11 +107,22 @@ class Suite:
         turns: list[TurnResult],
         conversations: list[ConversationResult],
         latency: LatencyReport | None,
+        judge: JudgeReport | None = None,
     ) -> dict[str, float | None]:
         metrics: dict[str, float | None] = {}
 
         wers = [t.wer for t in turns if t.wer is not None]
         metrics["wer"] = (sum(wers) / len(wers)) if wers else None
+
+        # Reported next to raw WER, never instead of it. Raw WER is the honest
+        # measure of what the recognizer emitted; semantic WER is the measure of
+        # whether it mattered. Keeping both is what makes a widening gap between
+        # them legible as a formatting change rather than a regression.
+        sem = [t.semantic_wer for t in turns if t.semantic_wer is not None]
+        metrics["semantic_wer"] = (sum(sem) / len(sem)) if sem else None
+
+        sims = [t.similarity for t in turns if t.similarity is not None]
+        metrics["semantic_similarity"] = (sum(sims) / len(sims)) if sims else None
 
         recalls = [t.terms.recall for t in turns if t.terms is not None]
         metrics["term_recall"] = (sum(recalls) / len(recalls)) if recalls else None
@@ -157,4 +174,10 @@ class Suite:
         metrics["dead_air_events"] = float(
             sum(c.turn_taking.dead_air_events for c in conversations if c.turn_taking)
         )
+
+        # None rather than 0 when nothing was judged, so an unconfigured judge
+        # reads as "not measured" and the threshold skips. Scoring it as zero
+        # would fail every suite that never opted in.
+        metrics["judge_score"] = judge.mean_score if judge else None
+        metrics["judge_pass_rate"] = judge.pass_rate if judge else None
         return metrics

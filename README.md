@@ -61,8 +61,23 @@ transaction survive? Dish names, street names, drug names, part numbers. Declare
 accepted `variants` (orthography and script differences aren't errors) and known
 `collapses` (specific mis-hears worth failing on by name).
 
-**Audio fixtures** — WAV I/O, SNR noise mixing, and 20ms framing for real-time
-push, all stdlib (`wave`, `array`, `math`) so the zero-dependency promise holds.
+**Semantic scoring** — WER compares strings; callers and recognizers disagree
+about strings for reasons that don't matter. `"I'd like two coffees at six thirty"`
+vs `"I would like 2 coffees at 6:30"` is a *perfect* transcription and a 50% WER.
+`semantic_wer` expands contractions, folds spoken numbers to digits and drops
+disfluencies first, so the number that survives is one you can gate on. Both are
+reported: raw WER says what the recognizer emitted, semantic WER says whether it
+mattered. For genuine paraphrase, plug in any embedding model via `Similarity`.
+
+**Conversation quality (LLM judge)** — the questions no assertion can answer: did
+it address what the caller asked, invent a price, stay in their language? Opt-in,
+provider-agnostic (`llm_judge` takes any `str -> str` function), fails soft, and
+defaults to WARN. Errored or abstaining judges are excluded from the mean rather
+than counted as zeros — a provider outage shouldn't look like an agent regression.
+
+**Audio fixtures** — WAV and raw-PCM I/O, SNR noise mixing, and 20ms framing for
+real-time push, all stdlib (`wave`, `array`, `math`) so the zero-dependency
+promise holds.
 
 **Digits** — phone numbers, order numbers, unit numbers. `"five one seven"` and
 `"517"` have a WER of 1.0 against each other and are the same number. Scored
@@ -91,6 +106,49 @@ not listening.
 **Tool calls** — required, forbidden, argument assertions, and duplicate-commit
 detection. Plus `claimed_without_committing()`, the highest-value assertion in the
 library: the agent *said* it booked something and never did.
+
+---
+
+## What running it against a live recognizer changed
+
+Every metric here was written against fakes first. Pointing it at a real
+streaming recognizer (Deepgram Flux, production config, 1x real-time) changed
+three things in the library — which is the point of writing the section down:
+
+**Padding defaults, from a measured sweep.** A healthy 1.9s clip returned an
+*empty* transcript. The audio was fine — a batch recognizer transcribed it
+perfectly. Sweeping silence padding at both ends (✓ = transcribed, · = empty):
+
+```
+"I'd like to order a beef noodle soup for pickup."   "Yes."   (quiet)
+        trail: 500  800 1000 1500          trail: 500  800 1000 1500
+lead=   0ms     ·    ·    ·    ✓      lead=   0ms     ✓    ✓    ✓    ✓
+lead= 200ms     ·    ·    ✓    ✓      lead= 200ms     ·    ✓    ✓    ✓
+lead= 500ms     ✓    ✓    ✓    ✓      lead= 500ms     ·    ·    ·    ✓
+```
+
+The two clips want *opposite* lead-ins, and lead-in isn't even monotonic. Only
+trailing silence ≥1500ms satisfies both, which is now the default. Under-pad and
+you publish "this recognizer silently drops routine sentences" and you're wrong.
+
+**Latency the transcript can't show.** All seven fixtures transcribed perfectly —
+WER 0.00, term recall 1.00. But finalization latency ran a 583ms median with
+`"Yes."`, the single most common confirmation in an ordering call, at **1811ms**.
+A caller says "yes" and waits nearly two seconds in silence. No text metric sees
+this.
+
+**Judges are stable; agents are not.** At temperature 0 the judge scored an
+identical transcript 65/100 eight times out of eight, byte-identical reasoning.
+Yet one scenario scored 40, 65 and 100 across three end-to-end runs — all of it
+agent sampling variance. If your judge scores swing, look at the agent first.
+
+It also caught two rubric bugs worth stealing. Asking the judge whether a tool
+fired, while correctly showing it only the spoken transcript, made it infer from
+wording and score a correct call 40/100 — tool assertions belong in
+`ToolExpectation`. And "quotes prices only from the menu it was given" cost an
+agent 35 points for correctly *adding two menu prices into a total*.
+
+See `examples/live_recognizer.py` and `examples/judged_scenarios.py`.
 
 ---
 
@@ -298,15 +356,26 @@ CI runs all three on Python 3.10–3.13.
 
 Worth stating plainly rather than discovering later:
 
-* **Not yet validated against a live recognizer.** Every test uses fakes. The
-  `StreamingTranscriber` contract is designed from a working production harness
-  but has not itself been run against Deepgram, Soniox or Whisper.
-* **No conversation-quality scoring.** There is no LLM judge for "was that a good
-  answer" — the tool-call and turn-taking checks cover whether the agent *did* the
-  right thing, not whether it *said* it well.
-* **WER is lexical, not semantic.** "I'd like" versus "I would like" counts as an
-  error. Term recall is the intended answer to this, but a semantic scorer would
-  be better for open-ended replies.
+* **Validated against one recognizer, not many.** The streaming path has been run
+  end-to-end against Deepgram Flux (see above), which is what produced the padding
+  defaults. Soniox, Whisper and Google have not been exercised, and the padding
+  frontier is very likely different for each — re-measure before trusting the
+  defaults on a new provider.
+* **Semantic normalization is English-only.** The contraction map, disfluency list
+  and spoken-number folding are English. `semantic_wer` degrades to ordinary WER
+  on other languages rather than failing, but it will not help there. Term recall
+  and script detection are language-agnostic and remain the better tools.
+* **Number folding is deliberately shallow.** "twenty five" folds to 25; "one
+  hundred and twenty three" does not. A wrong fold invents an error in a quantity,
+  which is worse than leaving two tokens unmatched.
+* **`token_f1` is a floor, not an embedding model.** It cannot see that "can I get"
+  and "I'd like to order" mean the same thing. It is genuinely good at the failure
+  embeddings are worst at — content that went missing — so it stays useful even
+  once you wire up a real `Similarity`.
+* **The judge is only as good as the rubric.** Two rubric bugs found in testing
+  (see above) each cost a correct agent 35–60 points. Write rubrics as observable
+  behaviour, never ask about tool calls, and read the reasoning before believing
+  a score.
 * **Script detection cannot separate same-alphabet languages.** English from
   Spanish, Hindi from Marathi. It answers "is this plausibly one of my languages",
   not "which language is this".

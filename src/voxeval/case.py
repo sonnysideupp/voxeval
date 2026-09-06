@@ -17,6 +17,13 @@ from dataclasses import dataclass, field
 
 from .metrics.language import LanguageCheck, check_language
 from .metrics.latency import TurnLatency
+from .metrics.tools import (
+    ToolCall,
+    ToolCallResult,
+    ToolExpectation,
+    check_tool_calls,
+    claimed_without_committing,
+)
 from .metrics.transcription import (
     Term,
     TermRecallResult,
@@ -25,7 +32,6 @@ from .metrics.transcription import (
     term_recall,
     word_error_rate,
 )
-from .metrics.tools import ToolCall, ToolCallResult, ToolExpectation, check_tool_calls, claimed_without_committing
 from .metrics.turntaking import TurnTakingReport, Utterance, analyze_turns
 
 
@@ -57,7 +63,7 @@ class TurnCase:
 
     Digit accuracy still scores; only WER is suppressed."""
 
-    def evaluate(self) -> "TurnResult":
+    def evaluate(self) -> TurnResult:
         return TurnResult(
             case=self,
             wer=(
@@ -94,16 +100,15 @@ class TurnResult:
         visibly degraded one."""
         if self.terms and self.terms.has_collapse:
             return False
-        if self.language and not self.language.ok:
-            return False
-        return True
+        return not (self.language and not self.language.ok)
 
     def __str__(self) -> str:
         bits = [f"{self.case.id}"]
         if self.wer is not None:
             bits.append(f"wer={self.wer:.0%}")
         if self.terms is not None:
-            bits.append(f"terms={len(self.terms.found)}/{len(self.terms.found) + len(self.terms.missed)}")
+            total = len(self.terms.found) + len(self.terms.missed)
+            bits.append(f"terms={len(self.terms.found)}/{total}")
             if self.terms.collapsed:
                 bits.append(f"COLLAPSE={self.terms.collapsed}")
         if self.digits is not None:
@@ -124,11 +129,15 @@ class ConversationCase:
     utterances: list[Utterance] = field(default_factory=list)
     latencies: list[TurnLatency] = field(default_factory=list)
 
-    def evaluate(self) -> "ConversationResult":
+    def evaluate(self) -> ConversationResult:
         commit_tools = self.expected_tools.commit_tools if self.expected_tools else ()
         return ConversationResult(
             case=self,
-            tools=check_tool_calls(self.tool_calls, self.expected_tools) if self.expected_tools else None,
+            tools=(
+                check_tool_calls(self.tool_calls, self.expected_tools)
+                if self.expected_tools
+                else None
+            ),
             turn_taking=analyze_turns(self.utterances) if self.utterances else None,
             false_completion=(
                 claimed_without_committing(self.transcript, self.tool_calls, commit_tools)
@@ -148,9 +157,7 @@ class ConversationResult:
     def ok(self) -> bool:
         if self.false_completion:
             return False
-        if self.tools and not self.tools.ok:
-            return False
-        return True
+        return not (self.tools and not self.tools.ok)
 
     def __str__(self) -> str:
         bits = [self.case.id]

@@ -19,12 +19,14 @@ is unchanged, so an adapter is the only code you own.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Protocol, Sequence, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from .audio import AudioBuffer
 from .case import ConversationCase, TurnCase
+from .gate import Gate
 from .metrics.latency import TurnLatency
 from .metrics.tools import ToolCall, ToolExpectation
 from .metrics.transcription import Term
@@ -42,7 +44,7 @@ class Transcriber(Protocol):
     also report confidence and timing.
     """
 
-    def __call__(self, audio: Path) -> "str | Transcription": ...
+    def __call__(self, audio: Path) -> str | Transcription: ...
 
 
 @dataclass
@@ -109,7 +111,7 @@ class StreamingTranscriber(Protocol):
     stopped speaking.
     """
 
-    def __call__(self, audio: "AudioBuffer") -> StreamResult: ...
+    def __call__(self, audio: AudioBuffer) -> StreamResult: ...
 
 
 @dataclass
@@ -193,7 +195,7 @@ def run_audio(cases: Sequence[AudioCase], transcriber: Transcriber) -> SuiteRepo
 def run_streaming(
     cases: Sequence[AudioCase],
     transcriber: StreamingTranscriber,
-    noise: "AudioBuffer | None" = None,
+    noise: AudioBuffer | None = None,
     snr_db: float = 6.0,
 ) -> SuiteReport:
     """Stream each fixture through a live recognizer and score text *and* latency.
@@ -255,7 +257,7 @@ def run_scenarios(scenarios: Sequence[Scenario], agent: Agent) -> SuiteReport:
     return suite.run()
 
 
-def assert_gate(report: SuiteReport, gate=None) -> None:
+def assert_gate(report: SuiteReport, gate: Gate | None = None) -> None:
     """Raise `AssertionError` with the full gate output if any check failed.
 
     For use inside pytest, so voice regressions fail the same way everything else

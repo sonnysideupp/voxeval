@@ -72,11 +72,11 @@ class Suite:
         self._turns: list[TurnCase] = []
         self._conversations: list[ConversationCase] = []
 
-    def add_turn(self, case: TurnCase) -> "Suite":
+    def add_turn(self, case: TurnCase) -> Suite:
         self._turns.append(case)
         return self
 
-    def add_conversation(self, case: ConversationCase) -> "Suite":
+    def add_conversation(self, case: ConversationCase) -> Suite:
         self._conversations.append(case)
         return self
 
@@ -117,9 +117,11 @@ class Suite:
         digits = [t.digits for t in turns if t.digits is not None]
         metrics["digit_accuracy"] = (sum(digits) / len(digits)) if digits else None
 
-        checked = [t for t in turns if t.language is not None]
+        language_checks = [t.language for t in turns if t.language is not None]
         metrics["out_of_set_language_rate"] = (
-            sum(1 for t in checked if not t.language.ok) / len(checked) if checked else None
+            sum(1 for c in language_checks if not c.ok) / len(language_checks)
+            if language_checks
+            else None
         )
 
         # Every latency key is always present, None when unmeasured. Keys that

@@ -286,8 +286,32 @@ customer. The closest analogy is `pytest` rather than a leaderboard.
 ```bash
 git clone https://github.com/<you>/voxeval && cd voxeval
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q          # 130 tests, no network
+
+.venv/bin/pytest -q            # 130 tests, no network
+.venv/bin/ruff check .         # clean
+.venv/bin/mypy src/voxeval     # strict, clean
 ```
+
+CI runs all three on Python 3.10–3.13.
+
+### Known limitations
+
+Worth stating plainly rather than discovering later:
+
+* **Not yet validated against a live recognizer.** Every test uses fakes. The
+  `StreamingTranscriber` contract is designed from a working production harness
+  but has not itself been run against Deepgram, Soniox or Whisper.
+* **No conversation-quality scoring.** There is no LLM judge for "was that a good
+  answer" — the tool-call and turn-taking checks cover whether the agent *did* the
+  right thing, not whether it *said* it well.
+* **WER is lexical, not semantic.** "I'd like" versus "I would like" counts as an
+  error. Term recall is the intended answer to this, but a semantic scorer would
+  be better for open-ended replies.
+* **Script detection cannot separate same-alphabet languages.** English from
+  Spanish, Hindi from Marathi. It answers "is this plausibly one of my languages",
+  not "which language is this".
+* **Default thresholds are opinions, not findings.** Calibrate them on your own
+  traffic before trusting them.
 
 The test suite is the specification — every metric's edge cases are written down
 there, including the ones that motivated it.

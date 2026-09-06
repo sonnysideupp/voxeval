@@ -26,7 +26,6 @@ answers "is this plausibly one of my languages", not "which language is this".
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass, field
 
 # Unicode block ranges, keyed by the script name used in `allowed_scripts`.

@@ -57,7 +57,7 @@ class Threshold:
         if self.margin < 0:
             raise ValueError(f"{self.name}: margin must be >= 0")
 
-    def evaluate(self, value: float | None) -> "ThresholdResult":
+    def evaluate(self, value: float | None) -> ThresholdResult:
         """Missing values pass.
 
         Deliberate: a pipeline that does not expose a stage (a speech-to-speech
@@ -72,6 +72,10 @@ class Threshold:
             bound = self.max_value + self.margin
             passed = value <= bound
         else:
+            # __post_init__ guarantees exactly one bound is set, so min_value is
+            # not None here. Assert it so the type checker knows too, rather than
+            # loosening strict mode for the whole file.
+            assert self.min_value is not None
             bound = self.min_value - self.margin
             passed = value >= bound
         return ThresholdResult(self, value, passed=passed, bound=bound)
@@ -129,7 +133,10 @@ class GateResult:
             suffix = f" ({len(self.warnings)} warning(s))" if self.warnings else ""
             lines.append(f"PASS — {len(self.results)} check(s){suffix}")
         else:
-            lines.append(f"FAIL — {len(self.failures)} of {len(self.results)} check(s) blocked the deploy")
+            lines.append(
+                f"FAIL — {len(self.failures)} of {len(self.results)} "
+                f"check(s) blocked the deploy"
+            )
         return "\n".join(lines)
 
 
@@ -147,7 +154,7 @@ class Gate:
         self.name = name
         self._thresholds: list[Threshold] = []
 
-    def add(self, threshold: Threshold) -> "Gate":
+    def add(self, threshold: Threshold) -> Gate:
         self._thresholds.append(threshold)
         return self
 

@@ -23,9 +23,9 @@ from __future__ import annotations
 import array
 import math
 import wave
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
 
 
 @dataclass
@@ -33,7 +33,7 @@ class AudioBuffer:
     """16-bit mono PCM. The format phone audio arrives in, and the one every
     streaming STT accepts."""
 
-    samples: array.array  # signed 16-bit
+    samples: array.array[int]  # signed 16-bit
     sample_rate: int
 
     def __post_init__(self) -> None:

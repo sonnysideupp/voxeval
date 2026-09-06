@@ -170,9 +170,11 @@ class TestStreaming:
         assert report.metrics["term_recall"] == 1.0
 
     def test_noise_is_mixed_before_streaming(self, tmp_path):
+        import array
+        import math
+
         from voxeval import Final, StreamResult, run_streaming
-        from voxeval.audio import AudioBuffer, rms, silence
-        import array, math
+        from voxeval.audio import AudioBuffer, rms
 
         seen = {}
 

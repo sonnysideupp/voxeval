@@ -2,6 +2,13 @@
 
 from .language import LanguageCheck, check_language, confidence_gate, detect_scripts
 from .latency import LatencyReport, LatencyStats, TurnLatency, analyze, percentile, summarize
+from .tools import (
+    ToolCall,
+    ToolCallResult,
+    ToolExpectation,
+    check_tool_calls,
+    claimed_without_committing,
+)
 from .transcription import (
     Term,
     TermRecallResult,
@@ -10,13 +17,6 @@ from .transcription import (
     normalize,
     term_recall,
     word_error_rate,
-)
-from .tools import (
-    ToolCall,
-    ToolCallResult,
-    ToolExpectation,
-    check_tool_calls,
-    claimed_without_committing,
 )
 from .turntaking import TurnTakingReport, Utterance, analyze_turns
 

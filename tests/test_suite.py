@@ -174,3 +174,26 @@ class TestToolFailuresReachTheGate:
         report = suite.run()
         assert report.metrics["tool_call_failures"] == 0
         assert report.gate().passed
+
+
+class TestMetricKeysAreStable:
+    """Keys that appear only when measured make report.metrics[...] raise for one
+    run and work for the next. The gate tolerates it via .get(); users don't."""
+
+    EXPECTED = {
+        "wer", "term_recall", "collapses", "digit_accuracy", "out_of_set_language_rate",
+        "end_to_end_p50_ms", "end_to_end_p95_ms", "stt_p95_ms", "llm_ttft_p95_ms",
+        "tts_ttfa_p95_ms", "barge_in_recovery_p95_ms", "tool_call_failures",
+        "duplicate_commits", "claimed_without_commit", "dead_air_events",
+    }
+
+    def test_empty_suite_still_has_every_key(self):
+        assert set(Suite().run().metrics) == self.EXPECTED
+
+    def test_populated_suite_has_the_same_keys(self):
+        assert set(_healthy_suite().run().metrics) == self.EXPECTED
+
+    def test_unmeasured_metrics_are_none_not_missing(self):
+        metrics = Suite().add_turn(TurnCase(id="t", hypothesis="hi")).run().metrics
+        assert metrics["stt_p95_ms"] is None
+        assert metrics["wer"] is None

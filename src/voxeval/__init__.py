@@ -27,12 +27,27 @@ from .adapters import (
     Agent,
     AudioCase,
     CallTrace,
+    Final,
     Scenario,
+    StreamingTranscriber,
+    StreamResult,
     Transcriber,
     Transcription,
     assert_gate,
     run_audio,
     run_scenarios,
+    run_streaming,
+)
+from .audio import (
+    AudioBuffer,
+    concat,
+    iter_frames,
+    load_wav,
+    mix_at_snr,
+    realtime_schedule,
+    rms,
+    save_wav,
+    silence,
 )
 from .case import (
     ConversationCase,
@@ -58,7 +73,10 @@ __version__ = "0.1.0"
 
 __all__ = [
     "Suite", "SuiteReport",
-    "run_audio", "run_scenarios", "assert_gate",
+    "run_audio", "run_streaming", "run_scenarios", "assert_gate",
+    "StreamingTranscriber", "StreamResult", "Final",
+    "AudioBuffer", "load_wav", "save_wav", "mix_at_snr", "iter_frames",
+    "silence", "concat", "rms", "realtime_schedule",
     "Transcriber", "Transcription", "Agent", "CallTrace", "AudioCase", "Scenario",
     "TurnCase", "TurnResult", "ConversationCase", "ConversationResult",
     "Gate", "GateResult", "Threshold", "Severity", "default_gate",

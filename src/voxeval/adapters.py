@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Protocol, Sequence, runtime_checkable
 
+from .audio import AudioBuffer
 from .case import ConversationCase, TurnCase
 from .metrics.latency import TurnLatency
 from .metrics.tools import ToolCall, ToolExpectation
@@ -53,6 +54,62 @@ class Transcription:
     text: str
     confidence: float | None = None
     latency: TurnLatency | None = None
+
+
+@dataclass
+class Final:
+    """One final transcript, with when it arrived relative to stream start."""
+
+    text: str
+    at_ms: float
+    confidence: float | None = None
+
+
+@dataclass
+class StreamResult:
+    """What a streaming recognizer produced for one utterance.
+
+    `audio_ended_at_ms` is when the last real audio frame was pushed — not the
+    trailing silence. Finalization latency is measured from there, because that is
+    the moment the caller stopped talking and started waiting.
+    """
+
+    finals: list[Final] = field(default_factory=list)
+    audio_ended_at_ms: float = 0.0
+
+    @property
+    def text(self) -> str:
+        return " ".join(f.text for f in self.finals if f.text).strip()
+
+    @property
+    def finalization_latency_ms(self) -> float | None:
+        """End of speech → last final. The number a batch API cannot give you.
+
+        None when nothing was transcribed — an empty result is a transcription
+        failure, not a latency of zero, and reporting 0ms would make a broken
+        recognizer look like the fastest one in the comparison.
+        """
+        if not self.finals:
+            return None
+        return max(0.0, max(f.at_ms for f in self.finals) - self.audio_ended_at_ms)
+
+    @property
+    def mean_confidence(self) -> float | None:
+        scored = [f.confidence for f in self.finals if f.confidence is not None]
+        return sum(scored) / len(scored) if scored else None
+
+
+@runtime_checkable
+class StreamingTranscriber(Protocol):
+    """A recognizer fed audio at real time, reporting finals with timestamps.
+
+    Use this over `Transcriber` whenever you care about latency or endpointing.
+    A batch interface cannot measure either: it returns text with no timeline, and
+    it never exercises the turn-taking model that decides when a caller has
+    stopped speaking.
+    """
+
+    def __call__(self, audio: "AudioBuffer") -> StreamResult: ...
 
 
 @dataclass
@@ -112,6 +169,9 @@ def run_audio(cases: Sequence[AudioCase], transcriber: Transcriber) -> SuiteRepo
 
         report = run_audio(cases, lambda p: my_stt.transcribe(p).text)
         sys.exit(report.gate().exit_code())
+
+    For latency and endpointing, use `run_streaming` instead — a batch
+    transcriber cannot report either.
     """
     suite = Suite("audio")
     for case in cases:
@@ -125,6 +185,51 @@ def run_audio(cases: Sequence[AudioCase], transcriber: Transcriber) -> SuiteRepo
             languages=case.languages,
             latency=transcription.latency,
             confidence=transcription.confidence,
+            score_wer=case.score_wer,
+        ))
+    return suite.run()
+
+
+def run_streaming(
+    cases: Sequence[AudioCase],
+    transcriber: StreamingTranscriber,
+    noise: "AudioBuffer | None" = None,
+    snr_db: float = 6.0,
+) -> SuiteReport:
+    """Stream each fixture through a live recognizer and score text *and* latency.
+
+        report = run_streaming(cases, my_streaming_stt)
+        report = run_streaming(cases, my_streaming_stt, noise=cafe, snr_db=6)
+
+    Passing `noise` mixes it into every fixture at `snr_db` before streaming,
+    which is how you test the failure that actually loses orders: a recognizer
+    that is perfect in a quiet room and drops the product name over a busy one.
+
+    Finalization latency lands in the report as the STT stage, so the standard
+    latency thresholds apply without extra wiring.
+    """
+    from .audio import load_wav, mix_at_snr
+
+    suite = Suite("streaming-audio")
+    for case in cases:
+        buffer = load_wav(case.audio)
+        if noise is not None:
+            buffer = mix_at_snr(buffer, noise, snr_db)
+
+        result = transcriber(buffer)
+        latency = (
+            TurnLatency(vad_to_stt_ms=result.finalization_latency_ms)
+            if result.finalization_latency_ms is not None
+            else None
+        )
+        suite.add_turn(TurnCase(
+            id=case.id,
+            hypothesis=result.text,
+            reference=case.reference,
+            terms=case.terms,
+            languages=case.languages,
+            latency=latency,
+            confidence=result.mean_confidence,
             score_wer=case.score_wer,
         ))
     return suite.run()

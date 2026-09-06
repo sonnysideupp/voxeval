@@ -122,3 +122,74 @@ class TestAssertGate:
         with pytest.raises(AssertionError) as exc:
             assert_gate(report)
         assert "out_of_set_language_rate" in str(exc.value)
+
+
+class TestStreaming:
+    """A batch transcriber cannot report finalization latency or exercise
+    endpointing. These cover the streaming path that can."""
+
+    def _wav(self, tmp_path, ms=1000):
+        from voxeval.audio import save_wav, silence
+        path = tmp_path / "f.wav"
+        save_wav(path, silence(ms, 16000))
+        return path
+
+    def test_finalization_latency_reaches_the_report(self, tmp_path):
+        from voxeval import Final, StreamResult, run_streaming
+
+        def stt(buffer):
+            return StreamResult(
+                finals=[Final("one kung pao chicken", at_ms=1240.0, confidence=0.91)],
+                audio_ended_at_ms=1000.0,
+            )
+
+        report = run_streaming([AudioCase("a", self._wav(tmp_path))], stt)
+        assert report.metrics["stt_p95_ms"] == 240.0
+
+    def test_empty_result_reports_no_latency_not_zero(self, tmp_path):
+        # A recognizer that transcribed nothing must not look like the fastest one.
+        from voxeval import StreamResult, run_streaming
+
+        report = run_streaming([AudioCase("a", self._wav(tmp_path))], lambda b: StreamResult())
+        assert report.metrics["stt_p95_ms"] is None
+
+    def test_multiple_finals_are_joined(self, tmp_path):
+        from voxeval import Final, StreamResult, run_streaming
+
+        def stt(buffer):
+            return StreamResult(
+                finals=[Final("one kung pao", 900.0), Final("chicken please", 1300.0)],
+                audio_ended_at_ms=1000.0,
+            )
+
+        report = run_streaming(
+            [AudioCase("a", self._wav(tmp_path),
+                       terms=[Term("Kung Pao Chicken", variants=("kung pao",))])],
+            stt,
+        )
+        assert report.metrics["term_recall"] == 1.0
+
+    def test_noise_is_mixed_before_streaming(self, tmp_path):
+        from voxeval import Final, StreamResult, run_streaming
+        from voxeval.audio import AudioBuffer, rms, silence
+        import array, math
+
+        seen = {}
+
+        def stt(buffer):
+            seen["rms"] = rms(buffer)
+            return StreamResult(finals=[Final("x", 10.0)], audio_ended_at_ms=0.0)
+
+        from voxeval.audio import save_wav
+        path = tmp_path / "speech.wav"
+        n = 16000
+        save_wav(path, AudioBuffer(
+            array.array("h", (int(6000 * math.sin(2 * math.pi * 440 * i / 16000)) for i in range(n))),
+            16000,
+        ))
+        noise = AudioBuffer(
+            array.array("h", (int(6000 * math.sin(2 * math.pi * 900 * i / 16000)) for i in range(n))),
+            16000,
+        )
+        run_streaming([AudioCase("a", path)], stt, noise=noise, snr_db=0)
+        assert seen["rms"] > 0

@@ -122,12 +122,15 @@ class Suite:
             sum(1 for t in checked if not t.language.ok) / len(checked) if checked else None
         )
 
-        if latency:
-            metrics["end_to_end_p50_ms"] = latency.end_to_end.p50
-            metrics["end_to_end_p95_ms"] = latency.end_to_end.p95
-            metrics["stt_p95_ms"] = latency.vad_to_stt.p95
-            metrics["llm_ttft_p95_ms"] = latency.stt_to_llm.p95
-            metrics["tts_ttfa_p95_ms"] = latency.llm_to_tts.p95
+        # Every latency key is always present, None when unmeasured. Keys that
+        # appear only sometimes make `report.metrics["stt_p95_ms"]` raise for one
+        # run and work for the next — the gate tolerates it via .get(), but anyone
+        # inspecting the dict directly gets a KeyError that depends on the data.
+        metrics["end_to_end_p50_ms"] = latency.end_to_end.p50 if latency else None
+        metrics["end_to_end_p95_ms"] = latency.end_to_end.p95 if latency else None
+        metrics["stt_p95_ms"] = latency.vad_to_stt.p95 if latency else None
+        metrics["llm_ttft_p95_ms"] = latency.stt_to_llm.p95 if latency else None
+        metrics["tts_ttfa_p95_ms"] = latency.llm_to_tts.p95 if latency else None
 
         recoveries = [
             c.turn_taking.worst_barge_in_recovery_ms

@@ -61,6 +61,9 @@ transaction survive? Dish names, street names, drug names, part numbers. Declare
 accepted `variants` (orthography and script differences aren't errors) and known
 `collapses` (specific mis-hears worth failing on by name).
 
+**Audio fixtures** — WAV I/O, SNR noise mixing, and 20ms framing for real-time
+push, all stdlib (`wave`, `array`, `math`) so the zero-dependency promise holds.
+
 **Digits** — phone numbers, order numbers, unit numbers. `"five one seven"` and
 `"517"` have a WER of 1.0 against each other and are the same number. Scored
 separately, and strictly: a phone number that's 90% right is 100% wrong.
@@ -109,7 +112,36 @@ There is no `openai:gpt-4`-style provider string for voice, and no trace format
 voice stacks agree on — so `voxeval` asks you for one of two small callables and
 does the rest.
 
-**Evaluating the recognizer** — anything `audio → text`. A lambda satisfies it:
+**Evaluating the recognizer, streaming** — the one that measures latency. Audio is
+pushed at 1× real time with trailing silence, and each final is timestamped:
+
+```python
+from voxeval import run_streaming, AudioCase, Term, StreamResult, Final, iter_frames, realtime_schedule
+
+def my_stt(audio):                      # AudioBuffer in, StreamResult out
+    stream, finals = deepgram.stream(), []
+    t0 = time.perf_counter()
+    for frame in iter_frames(audio, frame_ms=20, trailing_silence_ms=500):
+        stream.push(frame)
+        time.sleep(realtime_schedule(20))      # 1× real time, not as fast as possible
+    for f in stream.finals():
+        finals.append(Final(f.text, at_ms=(f.received_at - t0) * 1000, confidence=f.confidence))
+    return StreamResult(finals=finals, audio_ended_at_ms=audio.duration_ms)
+
+report = run_streaming(cases, my_stt)
+report = run_streaming(cases, my_stt, noise=cafe_noise, snr_db=6)   # robustness
+```
+
+Two things only exist on this path. **Finalization latency** — end of speech →
+final transcript — which a batch API cannot report, because it returns text with
+no timeline. And **endpointing**: turn-taking models decide a turn ended from
+silence, so pushing at 4× or without trailing silence makes a perfectly good
+recognizer emit nothing. Passing `noise` mixes it in at a target SNR first, which
+tests the failure that actually loses orders — a recognizer that's flawless in a
+quiet room and drops the product name over a busy dining room.
+
+**Evaluating the recognizer, batch** — when you only care about text. A lambda
+satisfies it:
 
 ```python
 from voxeval import run_audio, AudioCase, Term
@@ -254,7 +286,7 @@ customer. The closest analogy is `pytest` rather than a leaderboard.
 ```bash
 git clone https://github.com/<you>/voxeval && cd voxeval
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q          # 106 tests, no network
+.venv/bin/pytest -q          # 130 tests, no network
 ```
 
 The test suite is the specification — every metric's edge cases are written down

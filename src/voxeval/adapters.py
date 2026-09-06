@@ -73,6 +73,14 @@ class Final:
 class StreamResult:
     """What a streaming recognizer produced for one utterance.
 
+    **Not every streaming recognizer emits a final.** ElevenLabs Scribe v2
+    realtime emits only interim transcripts unless server VAD is enabled, because
+    it does no endpointing — turn boundaries are the caller's problem. A harness
+    that collects `FINAL_TRANSCRIPT` and nothing else records that recognizer as
+    producing empty transcripts, which is how a perfectly working provider gets
+    written up as broken. If your adapter sees no finals, fall back to the last
+    interim and say which you used.
+
     `audio_ended_at_ms` is when the last real audio frame was pushed — not the
     trailing silence. Finalization latency is measured from there, because that is
     the moment the caller stopped talking and started waiting.

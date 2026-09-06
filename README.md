@@ -163,11 +163,21 @@ padding*. At 1500ms the final never arrived naturally; the transcript only
 appeared because closing the stream flushed it. **If a fixture's latency lands
 near your padding, that's the reading to distrust first.**
 
-Running the same sweep against **Soniox stt-rt-v4** transcribed everything at
-every combination — no failures anywhere. That difference is the useful part:
-Flux is a *turn-taking* model that must observe silence to decide a turn ended,
-while Soniox is conventional streaming ASR that transcribes whatever arrives.
-Endpointing models are the ones that go silent when under-padded.
+Running the same sweep against two more recognizers made the rule weaker, and
+more honest. **Soniox stt-rt-v4** transcribed everything at every combination.
+**ElevenLabs Scribe v2 realtime** was fine on the loud clip but needed
+trail ≥ 1500ms on the quiet 0.7s one.
+
+The tempting story after two providers was "turn-taking models need padding,
+conventional ones don't." ElevenLabs breaks it — it does no endpointing at all
+and is still sensitive on short quiet audio. What the data supports is narrower:
+**short, quiet utterances are fragile everywhere, and endpointing models are
+fragile on top of that.** Measure your provider; don't infer from its
+architecture.
+
+ElevenLabs also surfaced a separate trap: **it never emits `FINAL_TRANSCRIPT`**,
+only interims. A harness collecting finals alone records it as transcribing
+nothing — a working recognizer written up as broken.
 
 **Latency the transcript can't show.** All seven fixtures transcribed perfectly —
 WER 0.00, term recall 1.00. But finalization latency ran a 583ms median with
@@ -399,11 +409,12 @@ CI runs the tests, ruff and mypy on Python 3.10, 3.11, 3.12 and 3.13. Green on a
 
 Worth stating plainly rather than discovering later:
 
-* **Validated against two recognizers, not many.** The streaming path has been run
-  end-to-end against Deepgram Flux (which produced the padding defaults) and
-  Soniox stt-rt-v4 (which is insensitive to them). Whisper, Google and
-  Speechmatics have not been exercised. Re-measure on a new provider — especially
-  an endpointing one.
+* **Validated against three recognizers, not many.** Deepgram Flux (which
+  produced the padding defaults), Soniox stt-rt-v4 (insensitive to them) and
+  ElevenLabs Scribe v2 realtime (sensitive only on short quiet audio, and
+  emitting no finals at all). Whisper, Google and Speechmatics have not been
+  exercised. Three providers was enough to falsify the clean architectural story
+  two suggested, so assume a fourth will surprise you too — measure, don't infer.
 * **Semantic normalization is English-only.** The contraction map, disfluency list
   and spoken-number folding are English. `semantic_wer` degrades to ordinary WER
   on other languages rather than failing, but it will not help there. Term recall

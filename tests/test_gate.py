@@ -90,3 +90,28 @@ class TestDefaultGate:
             "claimed_without_commit": 0,
         })
         assert result.passed
+
+
+class TestStageLatenciesAreGated:
+    """Regression: stt/llm/tts p95 were aggregated into metrics but no threshold
+    consumed them, so a run could measure a 1.7s STT finalization and print PASS."""
+
+    def test_every_computed_latency_metric_has_a_threshold(self):
+        from voxeval import Suite, default_gate
+        computed = {
+            k for k in Suite().run().metrics
+            if k.endswith("_ms") and not k.startswith("barge_in")
+        }
+        gated = {t.name for t in default_gate()._thresholds}
+        assert computed <= gated, f"computed but ungated: {sorted(computed - gated)}"
+
+    def test_slow_stt_finalization_warns(self):
+        from voxeval import default_gate
+        result = default_gate().check({"stt_p95_ms": 1811.0})
+        assert result.passed, "stage latency is advisory, not a deploy blocker"
+        assert any(w.threshold.name == "stt_p95_ms" for w in result.warnings)
+
+    def test_healthy_stt_finalization_is_silent(self):
+        from voxeval import default_gate
+        result = default_gate().check({"stt_p95_ms": 250.0})
+        assert not any(w.threshold.name == "stt_p95_ms" for w in result.warnings)

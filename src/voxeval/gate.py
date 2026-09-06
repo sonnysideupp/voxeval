@@ -203,6 +203,30 @@ def default_gate() -> Gate:
     ))
     gate.add(Threshold("end_to_end_p50_ms", max_value=1200.0, margin=200.0))
     gate.add(Threshold("end_to_end_p95_ms", max_value=3000.0, margin=500.0))
+    # Per-stage latencies. These were computed and left ungated in an earlier
+    # version, which meant a run could measure a 1.7s p95 STT finalization and
+    # still print PASS — the library naming the bottleneck and then ignoring it.
+    #
+    # WARN rather than FAIL because each is heavily config- and provider-
+    # dependent: STT finalization moves with your endpointing thresholds, TTFT
+    # with model and prompt length. They are here to make a stage regression
+    # visible, not to block on a number measured against one vendor.
+    gate.add(Threshold(
+        "stt_p95_ms", max_value=1000.0, margin=300.0, severity=Severity.WARN,
+        note="End of speech to final transcript. The caller hears this as silence "
+             "before the agent starts. Check the endpointing/EOT thresholds — "
+             "short confirmations like \"yes\" are usually the worst case.",
+    ))
+    gate.add(Threshold(
+        "llm_ttft_p95_ms", max_value=800.0, margin=200.0, severity=Severity.WARN,
+        note="Time to first token. Measure first token, not full completion — "
+             "scoring a streaming agent on total completion time overstates it "
+             "by hundreds of milliseconds.",
+    ))
+    gate.add(Threshold(
+        "tts_ttfa_p95_ms", max_value=400.0, margin=150.0, severity=Severity.WARN,
+        note="Time to first audio.",
+    ))
     gate.add(Threshold(
         "barge_in_recovery_p95_ms", max_value=500.0, margin=200.0,
         severity=Severity.WARN,

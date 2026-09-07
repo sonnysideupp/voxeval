@@ -236,7 +236,8 @@ class TestVapiNativeMessageShape:
     def test_native_message_field_is_read(self):
         trace = from_vapi(self.DOCUMENTED)
         assert trace.turns, "documented payload must produce turns"
-        assert trace.turns[0].heard == "One kung pao chicken please"
+        # turns[0] is the agent's opening greeting; the caller speaks in turns[1].
+        assert trace.turns[1].heard == "One kung pao chicken please"
 
     def test_turns_are_not_empty(self):
         trace = from_vapi(self.DOCUMENTED)
@@ -244,7 +245,7 @@ class TestVapiNativeMessageShape:
 
     def test_tool_calls_survive_normalization(self):
         trace = from_vapi(self.DOCUMENTED)
-        assert [c.name for c in trace.turns[0].tool_calls] == ["placeOrder"]
+        assert [c.name for c in trace.turns[1].tool_calls] == ["placeOrder"]
 
     def test_system_prompt_is_not_treated_as_speech(self):
         # Vapi includes the full system prompt in artifact.messages.
@@ -267,3 +268,52 @@ class TestVapiNativeMessageShape:
                 {"role": "user", "mystery_field": "hello"},
                 {"role": "assistant", "mystery_field": "hi"},
             ])
+
+
+class TestAgentSpeaksFirst:
+    """Nearly every real call opens with the agent greeting. Without its own
+    turn that greeting flushes onto the first caller turn, reversing cause and
+    effect in the transcript the judge reads."""
+
+    MESSAGES = [
+        {"role": "assistant", "content": "Thanks for calling, how can I help?"},
+        {"role": "user", "content": "One kung pao chicken please"},
+        {"role": "assistant", "content": "Got it."},
+    ]
+
+    def test_greeting_gets_its_own_leading_turn(self):
+        trace = from_openai_messages(self.MESSAGES)
+        assert len(trace.turns) == 2
+        assert trace.turns[0].received == ""
+        assert "how can I help" in trace.turns[0].agent_said
+
+    def test_transcript_order_is_causal(self):
+        from voxeval import ConversationCase
+
+        case = ConversationCase(id="c", turns=from_openai_messages(self.MESSAGES).turns)
+        lines = case.transcript.splitlines()
+        assert lines[0].startswith("Agent:"), lines
+        assert "kung pao" in lines[1]
+        assert lines[2] == "Agent: Got it."
+
+    def test_reply_stays_attached_to_the_turn_it_answers(self):
+        trace = from_openai_messages(self.MESSAGES)
+        assert trace.turns[1].received == "One kung pao chicken please"
+        assert trace.turns[1].agent_said == "Got it."
+
+    def test_vapi_documented_payload_is_ordered_correctly(self):
+        trace = from_vapi({"message": {"artifact": {"messages": [
+            {"role": "assistant", "message": "How can I help?"},
+            {"role": "user", "message": "One kung pao chicken please"},
+        ]}}})
+        assert trace.turns[0].agent_said == "How can I help?"
+        assert trace.turns[0].received == ""
+        assert trace.turns[1].received == "One kung pao chicken please"
+
+    def test_caller_first_call_is_unaffected(self):
+        trace = from_openai_messages([
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"},
+        ])
+        assert len(trace.turns) == 1
+        assert trace.turns[0].received == "hi"

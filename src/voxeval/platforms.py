@@ -116,8 +116,19 @@ def from_openai_messages(
         content = (message.get("content") or "").strip()
 
         if role == caller_role:
-            # A new caller utterance closes the previous turn.
-            flush_into_last()
+            if not turns and (pending_agent or pending_tools):
+                # The agent spoke before the caller did — which is how nearly
+                # every real call opens. Without its own turn, the greeting is
+                # flushed onto the FIRST caller turn and the transcript renders
+                # as "Customer: one kung pao chicken / Agent: how can I help?",
+                # reversing cause and effect. A judge reading that sees an agent
+                # ignoring the order it was just given.
+                turns.append(Turn(heard="", agent_said=" ".join(pending_agent).strip(),
+                                  tool_calls=list(pending_tools)))
+                pending_agent.clear()
+                pending_tools.clear()
+            else:
+                flush_into_last()
             turns.append(Turn(heard=content))
             continue
 

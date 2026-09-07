@@ -208,3 +208,62 @@ class TestEndToEndScoring:
                                            commit_tools=("placeOrder",)),
         )).run()
         assert report.metrics["claimed_without_commit"] == 1.0
+
+
+class TestVapiNativeMessageShape:
+    """Vapi's artifact.messages stores text under `message`, not `content`.
+
+    Handing it straight to an OpenAI-shaped parser yields a turn per utterance
+    with empty text: structurally a conversation, semantically gone. It slips
+    past the empty-payload guard because turns exist.
+    """
+
+    DOCUMENTED = {
+        "message": {
+            "type": "end-of-call-report",
+            "artifact": {"messages": [
+                {"role": "system", "message": "You are a helpful assistant..."},
+                {"role": "assistant", "message": "How can I help?"},
+                {"role": "user", "message": "One kung pao chicken please"},
+                {"role": "assistant", "message": "Placing that now.",
+                 "tool_calls": [{"id": "c1", "type": "function",
+                                 "function": {"name": "placeOrder",
+                                              "arguments": {"item": "kung pao"}}}]},
+            ]},
+        },
+    }
+
+    def test_native_message_field_is_read(self):
+        trace = from_vapi(self.DOCUMENTED)
+        assert trace.turns, "documented payload must produce turns"
+        assert trace.turns[0].heard == "One kung pao chicken please"
+
+    def test_turns_are_not_empty(self):
+        trace = from_vapi(self.DOCUMENTED)
+        assert any(t.received for t in trace.turns)
+
+    def test_tool_calls_survive_normalization(self):
+        trace = from_vapi(self.DOCUMENTED)
+        assert [c.name for c in trace.turns[0].tool_calls] == ["placeOrder"]
+
+    def test_system_prompt_is_not_treated_as_speech(self):
+        # Vapi includes the full system prompt in artifact.messages.
+        trace = from_vapi(self.DOCUMENTED)
+        assert not any("helpful assistant" in (t.received or "") for t in trace.turns)
+
+    def test_openai_formatted_is_preferred_when_present(self):
+        payload = {"message": {"artifact": {
+            "messages": [{"role": "user", "message": "native"}],
+            "messagesOpenAIFormatted": [{"role": "user", "content": "openai"}],
+        }}}
+        assert from_vapi(payload).turns[0].heard == "openai"
+
+    def test_all_empty_turns_raise_rather_than_score_clean(self):
+        # The guard for the failure this class exists to document: if the text
+        # field is ever renamed again, fail loudly instead of reporting a call
+        # in which nobody spoke.
+        with pytest.raises(EmptyPayloadError, match="every one is empty"):
+            from_openai_messages([
+                {"role": "user", "mystery_field": "hello"},
+                {"role": "assistant", "mystery_field": "hi"},
+            ])

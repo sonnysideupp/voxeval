@@ -149,6 +149,14 @@ def from_openai_messages(
         raise EmptyPayloadError(
             f"no conversation in {len(messages)} message(s): expected roles "
             f"{caller_role!r}/{agent_role!r}")
+    if not any(t.received or t.agent_said or t.tool_calls for t in turns):
+        # Turns present, all of them empty. Structurally a conversation,
+        # semantically nothing — the signature of reading the wrong text field
+        # (Vapi stores it under `message`, not `content`). Silently scoring this
+        # reports a clean call in which nobody spoke.
+        raise EmptyPayloadError(
+            f"{len(turns)} turn(s) parsed but every one is empty — is the text "
+            f"under a different key than 'content'?")
     return CallTrace(turns=turns)
 
 
@@ -215,6 +223,20 @@ def _from_retell_entries(entries: list[dict[str, Any]]) -> CallTrace:
     return CallTrace(turns=turns)
 
 
+def _normalize_vapi_message(entry: dict[str, Any]) -> dict[str, Any]:
+    """Vapi's native `{"role", "message"}` -> OpenAI's `{"role", "content"}`.
+
+    Tool calls are carried through under either spelling. `role: "system"` entries
+    (Vapi includes the full system prompt in artifact.messages) pass through and
+    are ignored downstream, which is correct — the system prompt is not something
+    the caller said.
+    """
+    normalized = dict(entry)
+    if "content" not in normalized and "message" in normalized:
+        normalized["content"] = normalized.get("message")
+    return normalized
+
+
 def from_vapi(payload: dict[str, Any]) -> CallTrace:
     """Map a Vapi `end-of-call-report` webhook payload.
 
@@ -227,7 +249,15 @@ def from_vapi(payload: dict[str, Any]) -> CallTrace:
     message = _unwrap(payload, "message")
     artifact = _sub(message, "artifact")
 
-    messages = artifact.get("messages") or artifact.get("messagesOpenAIFormatted") or []
+    # `messagesOpenAIFormatted` is preferred because it already uses `content`.
+    # `artifact.messages` is Vapi's native shape and stores the text under
+    # `message`, so handing it straight to from_openai_messages produces a turn
+    # per utterance with empty text — a conversation that is structurally present
+    # and semantically gone. That slips past the empty-payload guard, because
+    # turns exist; it just scores a call in which nobody said anything.
+    messages = artifact.get("messagesOpenAIFormatted") or []
+    if not messages:
+        messages = [_normalize_vapi_message(m) for m in (artifact.get("messages") or [])]
     if messages:
         trace = from_openai_messages(messages)
     else:

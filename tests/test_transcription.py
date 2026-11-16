@@ -152,6 +152,18 @@ class TestTermRecallWithReference:
         assert not result.measured
         assert term_recall("one ｔｅａ please", [Term("ｔｅａ")], reference="one tea please").found == ["ｔｅａ"]
 
+    def test_latin_term_beside_cjk_is_required_and_missed(self):
+        # Mixed-script speech: no space separates the Latin brand from the Chinese.
+        result = term_recall("我要coffee", [Term("Nescafé")], reference="我要Nescafé")
+        assert result.missed == ["Nescafé"]
+        assert result.measured
+
+    def test_latin_term_beside_cjk_matches_without_reference(self):
+        assert term_recall("我要Nescafé一杯", [Term("Nescafé")]).found == ["Nescafé"]
+
+    def test_script_boundary_does_not_reopen_substring_matches(self):
+        assert term_recall("我要steak", [Term("tea")]).missed == ["tea"]
+
     def test_cjk_term_still_matches_inside_unsegmented_text(self):
         term = Term("kung pao chicken", variants=("宫保鸡丁",))
         result = term_recall("我要宫保鸡丁", [term], reference="我要宫保鸡丁")

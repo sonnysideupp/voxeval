@@ -27,8 +27,25 @@ from ._text import normalize as normalize  # re-exported: it lived here first
 _UNSEGMENTED_SCRIPTS = ("CJK", "HIRAGANA", "KATAKANA", "THAI", "LAO", "KHMER", "MYANMAR", "TIBETAN")
 
 
+def _is_unsegmented(c: str) -> bool:
+    return unicodedata.name(c, "").startswith(_UNSEGMENTED_SCRIPTS)
+
+
 def _unsegmented(text: str) -> bool:
-    return any(unicodedata.name(c, "").startswith(_UNSEGMENTED_SCRIPTS) for c in text)
+    return any(_is_unsegmented(c) for c in text)
+
+
+def _term_tokens(text: str | None) -> list[str]:
+    """Tokens for term matching: normalized, with each unsegmented-script character
+    standing alone.
+
+    Mixed-script speech puts no space between scripts — "我要Nescafé" — so plain
+    `tokenize` yields one token "我要nescafé" and a Latin term never aligns with
+    it. Splitting at those characters makes the script change a boundary while
+    Latin words stay whole, so "tea" still does not match inside "steak". Only
+    term matching uses this; WER keeps `tokenize`, so its numbers don't move.
+    """
+    return "".join(f" {c} " if _is_unsegmented(c) else c for c in normalize(text or "")).split()
 
 
 def word_error_rate(reference: str, hypothesis: str) -> float:
@@ -126,7 +143,7 @@ def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
         return False
     if _unsegmented(text):
         return text in normalize(raw)
-    needle = [fold_plural(t) for t in text.split()]
+    needle = [fold_plural(t) for t in _term_tokens(text)]
     if not needle:
         return False
     haystack = [fold_plural(t) for t in hypothesis_tokens]
@@ -156,12 +173,12 @@ def term_recall(
     matching is the wrong tool here.
     """
     raw = hypothesis or ""
-    hypothesis_tokens = tokenize(hypothesis)
+    hypothesis_tokens = _term_tokens(hypothesis)
 
     def spoken(variant: str) -> bool:
         return reference is not None and _matches(variant, reference_tokens, reference)
 
-    reference_tokens = tokenize(reference) if reference is not None else []
+    reference_tokens = _term_tokens(reference) if reference is not None else []
     required = (
         terms
         if reference is None

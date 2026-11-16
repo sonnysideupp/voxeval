@@ -143,12 +143,14 @@ def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
     Multi-word terms still match inside longer utterances ("beef with broccoli"
     within a full sentence); they just have to align to token boundaries.
 
-    Non-ASCII variants keep raw substring matching: normalization leaves CJK
-    untouched and `.split()` is meaningless for it, so "牛肉面" is one word to a
-    reader and several tokens to the tokenizer.
+    Non-ASCII variants use substring matching: `.split()` is meaningless for CJK,
+    so "牛肉面" is one word to a reader and several tokens to the tokenizer. Both
+    sides are still normalized first, so "CAFÉ", "Café" and a decomposed "café"
+    all match `Term("café")`; comparing raw text dropped spoken terms from scoring.
     """
     if not variant.isascii():
-        return variant in raw
+        text = normalize(variant)
+        return bool(text) and text in normalize(raw)
     needle = [_singular(t) for t in tokenize(variant)]
     if not needle:
         return False

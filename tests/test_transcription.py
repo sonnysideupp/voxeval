@@ -130,6 +130,22 @@ class TestTermRecallWithReference:
         )
         assert result.collapsed == []
 
+    def test_accented_term_spoken_in_other_case_is_still_required(self):
+        # A spoken term must never drop out of scoring because of case or Unicode form.
+        result = term_recall("one coffee please", [Term("café")], reference="one CAFÉ please")
+        assert result.missed == ["café"]
+        assert result.measured
+
+    def test_accented_term_matches_hypothesis_case_insensitively(self):
+        decomposed = "cafe\u0301"  # "café" as e + combining accent
+        result = term_recall(f"one {decomposed.upper()} please", [Term("café")], reference="one café please")
+        assert result.found == ["café"]
+
+    def test_cjk_term_still_matches_inside_unsegmented_text(self):
+        term = Term("kung pao chicken", variants=("宫保鸡丁",))
+        result = term_recall("我要宫保鸡丁", [term], reference="我要宫保鸡丁")
+        assert result.found == ["kung pao chicken"]
+
     def test_without_reference_every_term_is_required(self):
         # Unchanged: with no reference there is no way to know what was said.
         result = term_recall("Yes.", self.MENU)

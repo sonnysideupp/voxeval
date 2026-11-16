@@ -85,6 +85,58 @@ class TestTermRecall:
         assert result.has_collapse
 
 
+class TestTermRecallWithReference:
+    """One vocabulary passed to every case, scored only on what was actually said."""
+
+    MENU = [
+        Term("kung pao chicken", variants=("kung pao",), collapses=("compound chicken",)),
+        Term("beef with broccoli", variants=("beef and broccoli",)),
+    ]
+
+    def test_only_spoken_terms_are_required(self):
+        said = "I'd like one kung pao chicken, extra spicy."
+        result = term_recall(said, self.MENU, reference=said)
+        assert result.recall == 1.0
+        assert result.found == ["kung pao chicken"]
+        assert result.missed == []
+
+    def test_a_spoken_term_can_still_be_missed(self):
+        result = term_recall(
+            "two beef with rockley please", self.MENU, reference="two beef with broccoli please"
+        )
+        assert result.recall == 0.0
+        assert result.missed == ["beef with broccoli"]
+
+    def test_variant_in_reference_makes_the_term_required(self):
+        result = term_recall("beef and broccoli", self.MENU, reference="beef and broccoli")
+        assert result.found == ["beef with broccoli"]
+
+    def test_no_spoken_terms_is_unmeasured_not_missed(self):
+        # The live-run bug: a perfect "Yes." scored 0/2 against the menu.
+        result = term_recall("Yes.", self.MENU, reference="Yes.")
+        assert result.missed == []
+        assert not result.measured
+
+    def test_collapse_still_caught_when_term_was_spoken(self):
+        result = term_recall(
+            "one compound chicken", self.MENU, reference="one kung pao chicken"
+        )
+        assert result.missed == ["kung pao chicken"]
+        assert result.collapsed == ["compound chicken"]
+
+    def test_collapse_the_speaker_said_is_not_a_mishear(self):
+        result = term_recall(
+            "is compound chicken a dish", self.MENU, reference="is compound chicken a dish"
+        )
+        assert result.collapsed == []
+
+    def test_without_reference_every_term_is_required(self):
+        # Unchanged: with no reference there is no way to know what was said.
+        result = term_recall("Yes.", self.MENU)
+        assert result.recall == 0.0
+        assert result.measured
+
+
 class TestDigits:
     def test_extracts_spelled_out_numbers(self):
         assert extract_digits("six one seven five five five") == "617555"

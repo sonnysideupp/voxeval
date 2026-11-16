@@ -45,6 +45,9 @@ class TurnCase:
     the TTS input; for real call audio it is a human transcription. Term recall
     works without a reference at all, which matters because real recordings are
     expensive to transcribe and the terms are usually the thing you care about.
+    Without one, every listed term is required, so list only what this utterance
+    contains; with one, only the terms actually spoken count, so a whole domain
+    vocabulary can be passed to every case.
     """
 
     id: str
@@ -95,7 +98,11 @@ class TurnCase:
                 if self.similarity is not None and self.reference
                 else None
             ),
-            terms=term_recall(self.hypothesis, self.terms) if self.terms else None,
+            terms=(
+                term_recall(self.hypothesis, self.terms, self.reference)
+                if self.terms
+                else None
+            ),
             # Decide on EXTRACTED digits, not literal digit characters. A spoken
             # number — "six one seven" — contains no digit chars, and that is
             # precisely the case this metric exists for. Checking `isdigit()`
@@ -139,8 +146,9 @@ class TurnResult:
         if self.similarity is not None:
             bits.append(f"sim={self.similarity:.2f}")
         if self.terms is not None:
-            total = len(self.terms.found) + len(self.terms.missed)
-            bits.append(f"terms={len(self.terms.found)}/{total}")
+            if self.terms.measured:
+                total = len(self.terms.found) + len(self.terms.missed)
+                bits.append(f"terms={len(self.terms.found)}/{total}")
             if self.terms.collapsed:
                 bits.append(f"COLLAPSE={self.terms.collapsed}")
         if self.digits is not None:

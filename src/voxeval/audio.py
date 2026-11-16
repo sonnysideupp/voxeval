@@ -231,15 +231,29 @@ def iter_frames(
     published "this recognizer silently drops routine sentences" and been wrong.
     That is the whole reason these defaults are generous.
 
-    **This sensitivity is not universal, and knowing which kind of model you have
-    tells you whether to care.** The same sweep against Soniox stt-rt-v4
-    transcribed both fixtures at every padding combination — no · anywhere. Flux
-    is a *turn-taking* model: it decides when a turn ended, so it needs to observe
-    silence resolve into speech and back. Soniox is conventional streaming ASR: it
-    transcribes what arrives and leaves turn boundaries to you. Endpointing models
-    are the ones that go silent when under-padded. The generous defaults cost
-    conventional recognizers nothing but wall-clock, which is why they are the
-    default for both.
+    **The sensitivity is not universal, but it is also not purely architectural.**
+    Running the same sweep against two more recognizers:
+
+        Soniox stt-rt-v4        transcribed everything, every combination
+        ElevenLabs Scribe v2    fine on the loud clip; the quiet 0.7s one needed
+                                trail >= 1500ms at low lead-in
+
+    The tempting story after two providers was "turn-taking models need padding,
+    conventional ones don't" — Flux decides when a turn ended, Soniox just
+    transcribes what arrives. ElevenLabs breaks that: it does no endpointing at
+    all (see `StreamResult` — it never emits a final) and is still sensitive on
+    short quiet audio.
+
+    So the honest rule is weaker and more useful: **short, quiet utterances were
+    fragile on two of the three recognizers tested, and the endpointing one was
+    fragile on both fixtures.** The defaults clear all three across every lead-in
+    tested, which is the only claim the data supports. Three providers was enough
+    to falsify the clean architectural story two suggested, so re-measure on a new
+    one rather than reasoning from its category.
+
+    (ElevenLabs was tested at its default configuration — `model_id=
+    scribe_v2_realtime`, server VAD off. With server VAD enabled it does emit
+    finals, and its padding behaviour was not measured in that mode.)
 
     The cost is real time you were spending anyway, and it does not distort
     latency: finalization is measured from the end of real audio, so the trailing

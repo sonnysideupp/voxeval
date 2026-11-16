@@ -33,7 +33,8 @@ from __future__ import annotations
 import unicodedata
 from typing import Protocol, runtime_checkable
 
-from .transcription import tokenize, word_error_rate
+from ._text import tokenize
+from .transcription import word_error_rate
 
 # Expanded rather than contracted, so "I'd"/"I would" converge. This is an
 # explicit whitelist and must stay one: the tempting generic rule ("'s" -> " is")

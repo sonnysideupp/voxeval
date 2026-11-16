@@ -255,3 +255,72 @@ class TestCallTraceExplicitEmpty:
                 turns=[Turn(spoken="do it", tool_calls=[ToolCall("confirmOrder")])]),
         )
         assert report.metrics["tool_call_failures"] == 0.0
+
+
+class TestInterimFallback:
+    """ElevenLabs Scribe v2 emits no FINAL_TRANSCRIPT at its default config. A
+    finals-only harness records a working recognizer as transcribing nothing."""
+
+    def _interim_only(self):
+        from voxeval import Final, StreamResult
+        return StreamResult(
+            interims=[Final(text="I'd like a", at_ms=100.0),
+                      Final(text="I'd like a beef noodle soup", at_ms=900.0)],
+            audio_ended_at_ms=1000.0,
+        )
+
+    def test_text_falls_back_to_last_interim(self):
+        assert self._interim_only().text == "I'd like a beef noodle soup"
+
+    def test_fallback_is_flagged(self):
+        assert self._interim_only().used_interim_fallback
+
+    def test_latency_does_not_fall_back(self):
+        # An interim is a running guess, not an end-of-turn decision. Timing it
+        # would report a finalization latency for something that never finalized.
+        assert self._interim_only().finalization_latency_ms is None
+
+    def test_confidence_does_not_fall_back(self):
+        assert self._interim_only().mean_confidence is None
+
+    def test_finals_win_when_present(self):
+        from voxeval import Final, StreamResult
+        result = StreamResult(
+            finals=[Final(text="the real transcript", at_ms=800.0)],
+            interims=[Final(text="the rea", at_ms=200.0)],
+            audio_ended_at_ms=700.0)
+        assert result.text == "the real transcript"
+        assert not result.used_interim_fallback
+        assert result.finalization_latency_ms == 100.0
+
+    def test_no_events_at_all(self):
+        from voxeval import StreamResult
+        empty = StreamResult()
+        assert empty.text == ""
+        assert not empty.used_interim_fallback
+
+    def test_blank_finals_fall_back_and_are_flagged(self):
+        # A whitespace-only final transcribed nothing. `text` and the flag must
+        # agree that the interim was used, and nothing finalized to time.
+        from voxeval import Final, StreamResult
+        result = StreamResult(
+            finals=[Final(text="  ", at_ms=1500.0, confidence=0.0)],
+            interims=[Final(text="one beef noodle soup", at_ms=900.0)],
+            audio_ended_at_ms=1000.0)
+        assert result.text == "one beef noodle soup"
+        assert result.used_interim_fallback
+        assert result.finalization_latency_ms is None
+        assert result.mean_confidence is None
+
+    def test_trailing_blank_final_does_not_stretch_latency_or_drag_confidence(self):
+        # Recognizers commonly flush an empty final at endpoint. The caller heard
+        # the answer at the last final that carried words.
+        from voxeval import Final, StreamResult
+        result = StreamResult(
+            finals=[Final(text="yes", at_ms=1300.0, confidence=0.9),
+                    Final(text="", at_ms=2400.0, confidence=0.0)],
+            audio_ended_at_ms=1000.0)
+        assert result.text == "yes"
+        assert not result.used_interim_fallback
+        assert result.finalization_latency_ms == 300.0
+        assert result.mean_confidence == 0.9

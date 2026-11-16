@@ -29,7 +29,7 @@ suite.add_turn(TurnCase(
 ))
 
 report = suite.run()
-print(report.metrics["wer"])        # 0.125  — looks fine
+print(report.metrics["wer"])        # 0.25   — passes the WER gate
 print(report.metrics["collapses"])  # 1.0    — the item silently left the order
 sys.exit(report.gate().exit_code()) # 1      — blocked
 ```
@@ -165,11 +165,24 @@ padding*. At 1500ms the final never arrived naturally; the transcript only
 appeared because closing the stream flushed it. **If a fixture's latency lands
 near your padding, that's the reading to distrust first.**
 
-Running the same sweep against **Soniox stt-rt-v4** transcribed everything at
-every combination — no failures anywhere. That difference is the useful part:
-Flux is a *turn-taking* model that must observe silence to decide a turn ended,
-while Soniox is conventional streaming ASR that transcribes whatever arrives.
-Endpointing models are the ones that go silent when under-padded.
+Running the same sweep against two more recognizers made the rule weaker, and
+more honest. **Soniox stt-rt-v4** transcribed everything at every combination.
+**ElevenLabs Scribe v2 realtime** was fine on the loud clip but needed
+trail ≥ 1500ms on the quiet 0.7s one.
+
+The tempting story after two providers was "turn-taking models need padding,
+conventional ones don't." ElevenLabs breaks it — it does no endpointing at all
+and is still sensitive on short quiet audio. What the data supports is narrower:
+**short, quiet utterances were fragile on two of the three, and the endpointing
+one was fragile on both fixtures.** Measure your provider; don't infer from its
+category.
+
+ElevenLabs also surfaced a separate trap: **at its default configuration it never
+emits `FINAL_TRANSCRIPT`**, only interims. A harness collecting finals alone
+records it as transcribing nothing — a working recognizer written up as broken.
+`StreamResult` takes interims and falls back to them, flagging it via
+`used_interim_fallback`. (With server VAD enabled it does finalize; that mode was
+not swept.)
 
 **Latency the transcript can't show.** All seven fixtures transcribed perfectly —
 WER 0.00, term recall 1.00. But finalization latency ran a 583ms median with
@@ -401,21 +414,23 @@ CI runs the tests, ruff and mypy on Python 3.10, 3.11, 3.12 and 3.13. Green on a
 
 Worth stating plainly rather than discovering later:
 
-* **Validated against two recognizers, not many.** The streaming path has been run
-  end-to-end against Deepgram Flux (which produced the padding defaults) and
-  Soniox stt-rt-v4 (which is insensitive to them). Whisper, Google and
-  Speechmatics have not been exercised. Re-measure on a new provider — especially
-  an endpointing one.
+* **Validated against three recognizers, not many.** Deepgram Flux (which
+  produced the padding defaults), Soniox stt-rt-v4 (insensitive to them) and
+  ElevenLabs Scribe v2 realtime (sensitive only on short quiet audio, and
+  emitting no finals at all). Whisper, Google and Speechmatics have not been
+  exercised. Three providers was enough to falsify the clean architectural story
+  two suggested, so assume a fourth will surprise you too — measure, don't infer.
 * **Semantic normalization is English-only.** The contraction map, disfluency list
   and spoken-number folding are English. `semantic_wer` degrades to ordinary WER
   on other languages rather than failing, but it will not help there. Term recall
   and script detection are language-agnostic and remain the better tools.
-* **Term matching folds English plurals only.** `Term("spring roll")` matches
-  "spring rolls" and `Term("glass")` matches "glasses", but irregular plurals
-  ("leaf"/"leaves") and non-English morphology are not handled. The escape hatch
-  is explicit `Term.variants`. Matching is on token boundaries, so `Term("ham")`
-  will not match "champagne" — an earlier substring version did, reporting a term
-  as found when it was never spoken.
+* **Morphology is English-only.** `fold_plural` handles regular plurals, `-es`
+  after a sibilant, and a table of irregulars ("leaf"/"leaves",
+  "knife"/"knives", "child"/"children"). It does not handle other languages, and
+  the irregular table is a lookup rather than a full pluralizer — the escape
+  hatch for anything it misses is an explicit `Term.variants`. Term matching is
+  on token boundaries, so `Term("ham")` will not match "champagne"; an earlier
+  substring version did, reporting a term as found when it was never spoken.
 * **Number folding is deliberately shallow.** "twenty five" folds to 25; "one
   hundred and twenty three" does not. A wrong fold invents an error in a quantity,
   which is worse than leaving two tokens unmatched.

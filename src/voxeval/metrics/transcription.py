@@ -16,25 +16,10 @@ item.
 
 from __future__ import annotations
 
-import unicodedata
 from dataclasses import dataclass, field
 
-
-def normalize(text: str) -> str:
-    """Lowercase, strip punctuation, collapse whitespace, NFKC-normalize.
-
-    Applied to both reference and hypothesis before comparison so that "Kung-Pao"
-    and "kung pao" are not counted as an error. Unicode normalization matters more
-    than it looks: a curly apostrophe in "General Tso's" arriving as a straight one
-    is not a transcription error, and counting it as one hides real ones.
-    """
-    text = unicodedata.normalize("NFKC", text or "")
-    text = "".join(c.lower() if (c.isalnum() or c.isspace()) else " " for c in text)
-    return " ".join(text.split())
-
-
-def tokenize(text: str) -> list[str]:
-    return normalize(text).split()
+from ._text import fold_plural, tokenize
+from ._text import normalize as normalize  # re-exported: it lived here first
 
 
 def word_error_rate(reference: str, hypothesis: str) -> float:
@@ -100,29 +85,6 @@ class TermRecallResult:
         return bool(self.collapsed)
 
 
-def _singular(token: str) -> str:
-    """Fold a trailing plural 's' so "spring roll" matches "spring rolls".
-
-    Applied to both sides, so it never needs to be *correct* English — only
-    consistent. "glass" keeps its double-s and "hamster" has no trailing s, which
-    is what stops this from undoing the token-boundary fix above: prefix matching
-    would make Term("ham") match "hamster" again.
-
-    Irregular plurals are not handled — "child"/"children", "leaf"/"leaves". They
-    are rare in the product nouns this metric guards, and the escape hatch is
-    already there: declare the other form in `Term.variants`.
-    """
-    # "-es" after a sibilant: glasses, boxes, dishes, sandwiches. Checked first,
-    # because "glass" ends in "ss" and the plain "-s" rule below leaves it alone.
-    if len(token) > 3 and token.endswith("es"):
-        stem = token[:-2]
-        if stem.endswith(("ss", "x", "z", "ch", "sh")):
-            return stem
-    if len(token) > 2 and token.endswith("s") and not token.endswith("ss"):
-        return token[:-1]
-    return token
-
-
 def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
     """Is this variant present as a whole token sequence?
 
@@ -140,10 +102,10 @@ def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
     """
     if not variant.isascii():
         return variant in raw
-    needle = [_singular(t) for t in tokenize(variant)]
+    needle = [fold_plural(t) for t in tokenize(variant)]
     if not needle:
         return False
-    haystack = [_singular(t) for t in hypothesis_tokens]
+    haystack = [fold_plural(t) for t in hypothesis_tokens]
     n = len(needle)
     return any(
         haystack[i:i + n] == needle

@@ -73,17 +73,45 @@ class Final:
 class StreamResult:
     """What a streaming recognizer produced for one utterance.
 
+    **Not every streaming recognizer emits a final.** ElevenLabs Scribe v2
+    realtime emits only interim transcripts unless server VAD is enabled, because
+    it does no endpointing — turn boundaries are the caller's problem. A harness
+    that collects `FINAL_TRANSCRIPT` and nothing else records that recognizer as
+    producing empty transcripts, which is how a perfectly working provider gets
+    written up as broken. If your adapter sees no finals, fall back to the last
+    interim and say which you used.
+
     `audio_ended_at_ms` is when the last real audio frame was pushed — not the
     trailing silence. Finalization latency is measured from there, because that is
     the moment the caller stopped talking and started waiting.
     """
 
     finals: list[Final] = field(default_factory=list)
+    interims: list[Final] = field(default_factory=list)
+    """Optional. Only consulted when nothing finalized."""
     audio_ended_at_ms: float = 0.0
 
     @property
+    def spoken_finals(self) -> list[Final]:
+        """Finals that carried words. Recognizers commonly emit blank finals — a
+        flush at endpoint, a turn of silence — and every property below ignores
+        them: a blank final transcribed nothing, so it neither ends the wait nor
+        has a confidence worth averaging."""
+        return [f for f in self.finals if f.text.strip()]
+
+    @property
     def text(self) -> str:
-        return " ".join(f.text for f in self.finals if f.text).strip()
+        spoken = self.spoken_finals
+        if spoken:
+            return " ".join(f.text.strip() for f in spoken)
+        return self.interims[-1].text.strip() if self.interims else ""
+
+    @property
+    def used_interim_fallback(self) -> bool:
+        """True when the transcript came from an interim because nothing
+        finalized. Worth surfacing in a report: the text is usable, the timing
+        is not."""
+        return not self.spoken_finals and bool(self.interims)
 
     @property
     def finalization_latency_ms(self) -> float | None:
@@ -93,13 +121,14 @@ class StreamResult:
         failure, not a latency of zero, and reporting 0ms would make a broken
         recognizer look like the fastest one in the comparison.
         """
-        if not self.finals:
+        spoken = self.spoken_finals
+        if not spoken:
             return None
-        return max(0.0, max(f.at_ms for f in self.finals) - self.audio_ended_at_ms)
+        return max(0.0, max(f.at_ms for f in spoken) - self.audio_ended_at_ms)
 
     @property
     def mean_confidence(self) -> float | None:
-        scored = [f.confidence for f in self.finals if f.confidence is not None]
+        scored = [f.confidence for f in self.spoken_finals if f.confidence is not None]
         return sum(scored) / len(scored) if scored else None
 
 

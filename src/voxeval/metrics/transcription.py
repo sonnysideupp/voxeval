@@ -16,10 +16,36 @@ item.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass, field
 
 from ._text import fold_plural, tokenize
 from ._text import normalize as normalize  # re-exported: it lived here first
+
+# Scripts written without spaces between words, where token boundaries don't exist
+# and a term can only be found as a substring.
+_UNSEGMENTED_SCRIPTS = ("CJK", "HIRAGANA", "KATAKANA", "THAI", "LAO", "KHMER", "MYANMAR", "TIBETAN")
+
+
+def _is_unsegmented(c: str) -> bool:
+    return unicodedata.name(c, "").startswith(_UNSEGMENTED_SCRIPTS)
+
+
+def _unsegmented(text: str) -> bool:
+    return any(_is_unsegmented(c) for c in text)
+
+
+def _term_tokens(text: str | None) -> list[str]:
+    """Tokens for term matching: normalized, with each unsegmented-script character
+    standing alone.
+
+    Mixed-script speech puts no space between scripts — "我要Nescafé" — so plain
+    `tokenize` yields one token "我要nescafé" and a Latin term never aligns with
+    it. Splitting at those characters makes the script change a boundary while
+    Latin words stay whole, so "tea" still does not match inside "steak". Only
+    term matching uses this; WER keeps `tokenize`, so its numbers don't move.
+    """
+    return "".join(f" {c} " if _is_unsegmented(c) else c for c in normalize(text or "")).split()
 
 
 def word_error_rate(reference: str, hypothesis: str) -> float:
@@ -84,6 +110,15 @@ class TermRecallResult:
         recognizer produced a plausible wrong answer rather than an obvious one."""
         return bool(self.collapsed)
 
+    @property
+    def measured(self) -> bool:
+        """False when no term was required, so there was nothing to recall.
+
+        A "Yes." clip scored against a menu vocabulary has recall 1.0 by definition.
+        Averaging that in would pad the suite's term recall with turns that never
+        tested it, so aggregation skips unmeasured results."""
+        return bool(self.found or self.missed)
+
 
 def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
     """Is this variant present as a whole token sequence?
@@ -96,13 +131,19 @@ def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
     Multi-word terms still match inside longer utterances ("beef with broccoli"
     within a full sentence); they just have to align to token boundaries.
 
-    Non-ASCII variants keep raw substring matching: normalization leaves CJK
-    untouched and `.split()` is meaningless for it, so "牛肉面" is one word to a
-    reader and several tokens to the tokenizer.
+    Scripts written without spaces use substring matching instead: `.split()` is
+    meaningless for them, so "牛肉面" is one word to a reader and several tokens to
+    the tokenizer. The choice is made after normalizing, on what the variant *is*
+    rather than whether its bytes are ASCII: "ｔｅａ" folds to "tea" and must keep
+    token boundaries, and "CAFÉ", "Café" or a decomposed "café" must all match
+    `Term("café")` — comparing raw text dropped spoken terms from scoring.
     """
-    if not variant.isascii():
-        return variant in raw
-    needle = [fold_plural(t) for t in tokenize(variant)]
+    text = normalize(variant)
+    if not text:
+        return False
+    if _unsegmented(text):
+        return text in normalize(raw)
+    needle = [fold_plural(t) for t in _term_tokens(text)]
     if not needle:
         return False
     haystack = [fold_plural(t) for t in hypothesis_tokens]
@@ -113,18 +154,40 @@ def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
     )
 
 
-def term_recall(hypothesis: str, terms: list[Term]) -> TermRecallResult:
+def term_recall(
+    hypothesis: str, terms: list[Term], reference: str | None = None
+) -> TermRecallResult:
     """Fraction of required terms that survived, plus any known collapses.
+
+    With a `reference`, a term is required only if the speaker actually said it.
+    That is what lets one domain vocabulary — a menu, a catalog — be passed to every
+    case: a clip of "Yes." cannot lose "kung pao chicken", because nobody said it.
+    Requiring every term regardless scored a perfectly transcribed "Yes." 0/2 in a
+    live run against Deepgram and failed the deploy gate for a recognizer that
+    missed nothing. Without a reference there is no way to know what was said, so
+    every term listed is required: pass only the terms that utterance contains.
+
+    A collapse the speaker actually said is not a mis-hear and is not reported.
 
     Matching is on whole token sequences — see `_matches` for why substring
     matching is the wrong tool here.
     """
     raw = hypothesis or ""
-    hypothesis_tokens = tokenize(hypothesis)
+    hypothesis_tokens = _term_tokens(hypothesis)
+
+    def spoken(variant: str) -> bool:
+        return reference is not None and _matches(variant, reference_tokens, reference)
+
+    reference_tokens = _term_tokens(reference) if reference is not None else []
+    required = (
+        terms
+        if reference is None
+        else [t for t in terms if any(spoken(v) for v in t.accepted())]
+    )
 
     found: list[str] = []
     missed: list[str] = []
-    for term in terms:
+    for term in required:
         hit = any(_matches(v, hypothesis_tokens, raw) for v in term.accepted())
         (found if hit else missed).append(term.name)
 
@@ -132,10 +195,10 @@ def term_recall(hypothesis: str, terms: list[Term]) -> TermRecallResult:
         c
         for term in terms
         for c in term.collapses
-        if _matches(c, hypothesis_tokens, raw)
+        if _matches(c, hypothesis_tokens, raw) and not spoken(c)
     ]
 
-    total = len(terms)
+    total = len(required)
     return TermRecallResult(
         recall=(len(found) / total) if total else 1.0,
         found=found,

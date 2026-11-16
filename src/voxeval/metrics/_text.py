@@ -21,10 +21,19 @@ def normalize(text: str) -> str:
     and "kung pao" are not counted as an error. Unicode normalization matters more
     than it looks: a curly apostrophe in "General Tso's" arriving as a straight one
     is not a transcription error, and counting it as one hides real ones.
+
+    Combining marks are kept. NFKC already composes the accents Latin scripts have
+    precomposed forms for; the marks left are spelling, not decoration — the
+    Devanagari vowel signs that make दिन (day) and दीन (poor) different words.
+    `isalnum()` rejects them, so dropping non-alphanumerics alone erased them.
     """
     text = unicodedata.normalize("NFKC", text or "")
-    text = "".join(c.lower() if (c.isalnum() or c.isspace()) else " " for c in text)
+    text = "".join(c.lower() if _kept(c) else " " for c in text)
     return " ".join(text.split())
+
+
+def _kept(c: str) -> bool:
+    return c.isalnum() or c.isspace() or unicodedata.category(c).startswith("M")
 
 
 def tokenize(text: str) -> list[str]:

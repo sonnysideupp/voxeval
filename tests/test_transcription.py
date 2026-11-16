@@ -85,6 +85,97 @@ class TestTermRecall:
         assert result.has_collapse
 
 
+class TestTermRecallWithReference:
+    """One vocabulary passed to every case, scored only on what was actually said."""
+
+    MENU = [
+        Term("kung pao chicken", variants=("kung pao",), collapses=("compound chicken",)),
+        Term("beef with broccoli", variants=("beef and broccoli",)),
+    ]
+
+    def test_only_spoken_terms_are_required(self):
+        said = "I'd like one kung pao chicken, extra spicy."
+        result = term_recall(said, self.MENU, reference=said)
+        assert result.recall == 1.0
+        assert result.found == ["kung pao chicken"]
+        assert result.missed == []
+
+    def test_a_spoken_term_can_still_be_missed(self):
+        result = term_recall(
+            "two beef with rockley please", self.MENU, reference="two beef with broccoli please"
+        )
+        assert result.recall == 0.0
+        assert result.missed == ["beef with broccoli"]
+
+    def test_variant_in_reference_makes_the_term_required(self):
+        result = term_recall("beef and broccoli", self.MENU, reference="beef and broccoli")
+        assert result.found == ["beef with broccoli"]
+
+    def test_no_spoken_terms_is_unmeasured_not_missed(self):
+        # The live-run bug: a perfect "Yes." scored 0/2 against the menu.
+        result = term_recall("Yes.", self.MENU, reference="Yes.")
+        assert result.missed == []
+        assert not result.measured
+
+    def test_collapse_still_caught_when_term_was_spoken(self):
+        result = term_recall(
+            "one compound chicken", self.MENU, reference="one kung pao chicken"
+        )
+        assert result.missed == ["kung pao chicken"]
+        assert result.collapsed == ["compound chicken"]
+
+    def test_collapse_the_speaker_said_is_not_a_mishear(self):
+        result = term_recall(
+            "is compound chicken a dish", self.MENU, reference="is compound chicken a dish"
+        )
+        assert result.collapsed == []
+
+    def test_accented_term_spoken_in_other_case_is_still_required(self):
+        # A spoken term must never drop out of scoring because of case or Unicode form.
+        result = term_recall("one coffee please", [Term("café")], reference="one CAFÉ please")
+        assert result.missed == ["café"]
+        assert result.measured
+
+    def test_accented_term_matches_hypothesis_case_insensitively(self):
+        decomposed = "cafe\u0301"  # "café" as e + combining accent
+        result = term_recall(f"one {decomposed.upper()} please", [Term("café")], reference="one café please")
+        assert result.found == ["café"]
+
+    def test_devanagari_vowel_signs_are_not_erased(self):
+        # दिन (day) and दीन (poor) differ only in a combining vowel sign.
+        result = term_recall("दीन", [Term("दिन")], reference="दिन")
+        assert result.missed == ["दिन"]
+
+    def test_fullwidth_latin_keeps_token_boundaries(self):
+        # "ｔｅａ" folds to "tea", which must not match inside "steak".
+        result = term_recall("steak", [Term("ｔｅａ")], reference="steak")
+        assert not result.measured
+        assert term_recall("one ｔｅａ please", [Term("ｔｅａ")], reference="one tea please").found == ["ｔｅａ"]
+
+    def test_latin_term_beside_cjk_is_required_and_missed(self):
+        # Mixed-script speech: no space separates the Latin brand from the Chinese.
+        result = term_recall("我要coffee", [Term("Nescafé")], reference="我要Nescafé")
+        assert result.missed == ["Nescafé"]
+        assert result.measured
+
+    def test_latin_term_beside_cjk_matches_without_reference(self):
+        assert term_recall("我要Nescafé一杯", [Term("Nescafé")]).found == ["Nescafé"]
+
+    def test_script_boundary_does_not_reopen_substring_matches(self):
+        assert term_recall("我要steak", [Term("tea")]).missed == ["tea"]
+
+    def test_cjk_term_still_matches_inside_unsegmented_text(self):
+        term = Term("kung pao chicken", variants=("宫保鸡丁",))
+        result = term_recall("我要宫保鸡丁", [term], reference="我要宫保鸡丁")
+        assert result.found == ["kung pao chicken"]
+
+    def test_without_reference_every_term_is_required(self):
+        # Unchanged: with no reference there is no way to know what was said.
+        result = term_recall("Yes.", self.MENU)
+        assert result.recall == 0.0
+        assert result.measured
+
+
 class TestDigits:
     def test_extracts_spelled_out_numbers(self):
         assert extract_digits("six one seven five five five") == "617555"

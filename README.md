@@ -61,7 +61,9 @@ in production and a text-based eval had scored it as a pass.
 **Transcription** — WER, plus **term recall**: did the words that carry the
 transaction survive? Dish names, street names, drug names, part numbers. Declare
 accepted `variants` (orthography and script differences aren't errors) and known
-`collapses` (specific mis-hears worth failing on by name).
+`collapses` (specific mis-hears worth failing on by name). With a `reference`, only
+the terms actually spoken count, so one vocabulary can be passed to every case;
+without one, every term listed is required.
 
 **Voice multi-turn, in one abstraction with text** — a `Turn` carries what the
 caller *said*, what the recognizer *heard*, what the agent replied, and what it
@@ -326,7 +328,7 @@ for call in load_recent_calls():                     # your traces, your source
     suite.add_turn(TurnCase(
         id=call.id,
         hypothesis=call.transcript,
-        terms=[Term(item) for item in catalog_terms()],
+        terms=[Term(item) for item in call.ordered_items],  # no reference: list what was said
         latency=TurnLatency(
             vad_to_stt_ms=call.stt_ms,
             stt_to_llm_ms=call.ttft_ms,

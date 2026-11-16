@@ -130,7 +130,7 @@ class Suite:
         sims = [t.similarity for t in turns if t.similarity is not None]
         metrics["semantic_similarity"] = (sum(sims) / len(sims)) if sims else None
 
-        recalls = [t.terms.recall for t in turns if t.terms is not None]
+        recalls = [t.terms.recall for t in turns if t.terms is not None and t.terms.measured]
         metrics["term_recall"] = (sum(recalls) / len(recalls)) if recalls else None
 
         metrics["collapses"] = float(

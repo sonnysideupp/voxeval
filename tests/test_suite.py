@@ -315,3 +315,31 @@ class TestExplicitEmptyIsNotAbsent:
     def test_no_turns_and_no_transcript_yields_empty_string(self):
         from voxeval import ConversationCase
         assert ConversationCase(id="c").transcript == ""
+
+
+def test_shared_vocabulary_scores_only_what_each_case_said():
+    """Regression for a live Deepgram run: five clips transcribed perfectly, but a
+    menu vocabulary passed to every case made term recall 0.2 and failed the gate."""
+    menu = [
+        Term("kung pao chicken", variants=("kung pao",)),
+        Term("beef with broccoli", variants=("beef and broccoli",)),
+    ]
+    suite = Suite()
+    for case_id, said in [
+        ("kung_pao", "I'd like one kung pao chicken, extra spicy."),
+        ("broccoli", "Can I get two beef with broccoli and an egg roll?"),
+        ("yes", "Yes."),
+    ]:
+        suite.add_turn(TurnCase(id=case_id, reference=said, hypothesis=said, terms=menu))
+    report = suite.run()
+    assert report.metrics["term_recall"] == 1.0
+    assert report.gate().exit_code() == 0
+    yes = next(t for t in report.turns if t.case.id == "yes")
+    assert "terms=" not in str(yes)
+
+
+def test_term_recall_is_unmeasured_when_no_case_said_a_term():
+    suite = Suite()
+    suite.add_turn(TurnCase(id="yes", reference="Yes.", hypothesis="Yes.",
+                            terms=[Term("kung pao chicken")]))
+    assert suite.run().metrics["term_recall"] is None

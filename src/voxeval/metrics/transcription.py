@@ -27,10 +27,28 @@ def normalize(text: str) -> str:
     and "kung pao" are not counted as an error. Unicode normalization matters more
     than it looks: a curly apostrophe in "General Tso's" arriving as a straight one
     is not a transcription error, and counting it as one hides real ones.
+
+    Combining marks are kept. NFKC already composes the accents Latin scripts have
+    precomposed forms for; the marks left are spelling, not decoration — the
+    Devanagari vowel signs that make दिन (day) and दीन (poor) different words.
+    `isalnum()` rejects them, so dropping non-alphanumerics alone erased them.
     """
     text = unicodedata.normalize("NFKC", text or "")
-    text = "".join(c.lower() if (c.isalnum() or c.isspace()) else " " for c in text)
+    text = "".join(c.lower() if _kept(c) else " " for c in text)
     return " ".join(text.split())
+
+
+def _kept(c: str) -> bool:
+    return c.isalnum() or c.isspace() or unicodedata.category(c).startswith("M")
+
+
+# Scripts written without spaces between words, where token boundaries don't exist
+# and a term can only be found as a substring.
+_UNSEGMENTED_SCRIPTS = ("CJK", "HIRAGANA", "KATAKANA", "THAI", "LAO", "KHMER", "MYANMAR", "TIBETAN")
+
+
+def _unsegmented(text: str) -> bool:
+    return any(unicodedata.name(c, "").startswith(_UNSEGMENTED_SCRIPTS) for c in text)
 
 
 def tokenize(text: str) -> list[str]:
@@ -143,15 +161,19 @@ def _matches(variant: str, hypothesis_tokens: list[str], raw: str) -> bool:
     Multi-word terms still match inside longer utterances ("beef with broccoli"
     within a full sentence); they just have to align to token boundaries.
 
-    Non-ASCII variants use substring matching: `.split()` is meaningless for CJK,
-    so "牛肉面" is one word to a reader and several tokens to the tokenizer. Both
-    sides are still normalized first, so "CAFÉ", "Café" and a decomposed "café"
-    all match `Term("café")`; comparing raw text dropped spoken terms from scoring.
+    Scripts written without spaces use substring matching instead: `.split()` is
+    meaningless for them, so "牛肉面" is one word to a reader and several tokens to
+    the tokenizer. The choice is made after normalizing, on what the variant *is*
+    rather than whether its bytes are ASCII: "ｔｅａ" folds to "tea" and must keep
+    token boundaries, and "CAFÉ", "Café" or a decomposed "café" must all match
+    `Term("café")` — comparing raw text dropped spoken terms from scoring.
     """
-    if not variant.isascii():
-        text = normalize(variant)
-        return bool(text) and text in normalize(raw)
-    needle = [_singular(t) for t in tokenize(variant)]
+    text = normalize(variant)
+    if not text:
+        return False
+    if _unsegmented(text):
+        return text in normalize(raw)
+    needle = [_singular(t) for t in text.split()]
     if not needle:
         return False
     haystack = [_singular(t) for t in hypothesis_tokens]

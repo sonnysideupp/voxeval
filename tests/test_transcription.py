@@ -141,6 +141,17 @@ class TestTermRecallWithReference:
         result = term_recall(f"one {decomposed.upper()} please", [Term("café")], reference="one café please")
         assert result.found == ["café"]
 
+    def test_devanagari_vowel_signs_are_not_erased(self):
+        # दिन (day) and दीन (poor) differ only in a combining vowel sign.
+        result = term_recall("दीन", [Term("दिन")], reference="दिन")
+        assert result.missed == ["दिन"]
+
+    def test_fullwidth_latin_keeps_token_boundaries(self):
+        # "ｔｅａ" folds to "tea", which must not match inside "steak".
+        result = term_recall("steak", [Term("ｔｅａ")], reference="steak")
+        assert not result.measured
+        assert term_recall("one ｔｅａ please", [Term("ｔｅａ")], reference="one tea please").found == ["ｔｅａ"]
+
     def test_cjk_term_still_matches_inside_unsegmented_text(self):
         term = Term("kung pao chicken", variants=("宫保鸡丁",))
         result = term_recall("我要宫保鸡丁", [term], reference="我要宫保鸡丁")

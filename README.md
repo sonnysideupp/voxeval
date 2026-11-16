@@ -29,7 +29,7 @@ suite.add_turn(TurnCase(
 ))
 
 report = suite.run()
-print(report.metrics["wer"])        # 0.125  — looks fine
+print(report.metrics["wer"])        # 0.25   — passes the WER gate
 print(report.metrics["collapses"])  # 1.0    — the item silently left the order
 sys.exit(report.gate().exit_code()) # 1      — blocked
 ```

@@ -92,10 +92,18 @@ class StreamResult:
     audio_ended_at_ms: float = 0.0
 
     @property
+    def spoken_finals(self) -> list[Final]:
+        """Finals that carried words. Recognizers commonly emit blank finals — a
+        flush at endpoint, a turn of silence — and every property below ignores
+        them: a blank final transcribed nothing, so it neither ends the wait nor
+        has a confidence worth averaging."""
+        return [f for f in self.finals if f.text.strip()]
+
+    @property
     def text(self) -> str:
-        joined = " ".join(f.text for f in self.finals if f.text).strip()
-        if joined:
-            return joined
+        spoken = self.spoken_finals
+        if spoken:
+            return " ".join(f.text.strip() for f in spoken)
         return self.interims[-1].text.strip() if self.interims else ""
 
     @property
@@ -103,7 +111,7 @@ class StreamResult:
         """True when the transcript came from an interim because nothing
         finalized. Worth surfacing in a report: the text is usable, the timing
         is not."""
-        return not any(f.text for f in self.finals) and bool(self.interims)
+        return not self.spoken_finals and bool(self.interims)
 
     @property
     def finalization_latency_ms(self) -> float | None:
@@ -113,13 +121,14 @@ class StreamResult:
         failure, not a latency of zero, and reporting 0ms would make a broken
         recognizer look like the fastest one in the comparison.
         """
-        if not self.finals:
+        spoken = self.spoken_finals
+        if not spoken:
             return None
-        return max(0.0, max(f.at_ms for f in self.finals) - self.audio_ended_at_ms)
+        return max(0.0, max(f.at_ms for f in spoken) - self.audio_ended_at_ms)
 
     @property
     def mean_confidence(self) -> float | None:
-        scored = [f.confidence for f in self.finals if f.confidence is not None]
+        scored = [f.confidence for f in self.spoken_finals if f.confidence is not None]
         return sum(scored) / len(scored) if scored else None
 
 

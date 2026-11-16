@@ -298,3 +298,29 @@ class TestInterimFallback:
         empty = StreamResult()
         assert empty.text == ""
         assert not empty.used_interim_fallback
+
+    def test_blank_finals_fall_back_and_are_flagged(self):
+        # A whitespace-only final transcribed nothing. `text` and the flag must
+        # agree that the interim was used, and nothing finalized to time.
+        from voxeval import Final, StreamResult
+        result = StreamResult(
+            finals=[Final(text="  ", at_ms=1500.0, confidence=0.0)],
+            interims=[Final(text="one beef noodle soup", at_ms=900.0)],
+            audio_ended_at_ms=1000.0)
+        assert result.text == "one beef noodle soup"
+        assert result.used_interim_fallback
+        assert result.finalization_latency_ms is None
+        assert result.mean_confidence is None
+
+    def test_trailing_blank_final_does_not_stretch_latency_or_drag_confidence(self):
+        # Recognizers commonly flush an empty final at endpoint. The caller heard
+        # the answer at the last final that carried words.
+        from voxeval import Final, StreamResult
+        result = StreamResult(
+            finals=[Final(text="yes", at_ms=1300.0, confidence=0.9),
+                    Final(text="", at_ms=2400.0, confidence=0.0)],
+            audio_ended_at_ms=1000.0)
+        assert result.text == "yes"
+        assert not result.used_interim_fallback
+        assert result.finalization_latency_ms == 300.0
+        assert result.mean_confidence == 0.9
